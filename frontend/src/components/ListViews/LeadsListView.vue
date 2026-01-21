@@ -681,15 +681,15 @@ function sendSMS(number) {
 .status-badge {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 7px 14px;
-  font-size: 13px;
+  gap: 4px;
+  padding: 5px 10px;
+  font-size: 11px;
   font-weight: 600;
-  border-radius: 9px;
-  border: 1.5px solid;
+  border-radius: 7px;
+  border: 1px solid;
   cursor: pointer;
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  min-width: 140px;
+  min-width: 120px;
   justify-content: center;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
   position: relative;
@@ -735,8 +735,8 @@ function sendSMS(number) {
 }
 
 .status-badge-icon {
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
   transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   flex-shrink: 0;
 }
@@ -744,10 +744,10 @@ function sendSMS(number) {
 /* Dropdown Menu */
 .status-dropdown-menu {
   position: fixed;
-  min-width: 240px;
-  max-width: 280px;
+  min-width: 180px;
+  max-width: 220px;
   background: white;
-  border-radius: 14px;
+  border-radius: 12px;
   box-shadow: 
     0 20px 40px rgba(0, 0, 0, 0.15),
     0 0 0 1px rgba(0, 0, 0, 0.05);
@@ -799,14 +799,14 @@ function sendSMS(number) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 16px;
+  padding: 10px 12px;
   border-bottom: 1px solid #e5e7eb;
 }
 
 .status-dropdown-list {
-  max-height: 340px;
+  max-height: 240px;
   overflow-y: auto;
-  padding: 8px;
+  padding: 6px;
 }
 
 /* Responsive dropdown list */
@@ -826,10 +826,10 @@ function sendSMS(number) {
 .status-dropdown-item {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   width: 100%;
-  padding: 11px 14px;
-  font-size: 13.5px;
+  padding: 8px 12px;
+  font-size: 12.5px;
   font-weight: 500;
   text-align: left;
   border: none;
