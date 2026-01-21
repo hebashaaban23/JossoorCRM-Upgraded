@@ -1,0 +1,45 @@
+# =====================
+# OS / Editor
+# =====================
+.DS_Store
+Thumbs.db
+tags
+*.swp
+
+# =====================
+# Python
+# =====================
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.env
+.venv/
+venv/
+
+# =====================
+# Node / Frontend
+# =====================
+node_modules/
+dev-dist/
+dist/
+build/
+
+# =====================
+# Frappe / CRM
+# =====================
+sites/*/private/
+sites/*/logs/
+sites/*/locks/
+sites/assets/
+
+# Generated frontend output (keep source, ignore compiled)
+crm/public/frontend/
+crm/www/crm.html
+
+# =====================
+# Git
+# =====================
+*.orig
+
+
