@@ -1,4 +1,5 @@
 <template>
+  <!-- نمرّر createFilter ونسمع حدث new -->
   <ActivityHeader
     v-model="tabIndex"
     v-model:showWhatsappTemplates="showWhatsappTemplates"
@@ -9,14 +10,22 @@
     :emailBox="emailBox"
     :whatsappBox="whatsappBox"
     :modalRef="modalRef"
+    :createFilter="createFilter"
+    @new="onNewFromHeader"
   />
-  <FadedScrollableDiv class="flex flex-col h-full overflow-y-auto">
+  <FadedScrollableDiv
+    :maskHeight="30"
+    class="flex flex-col flex-1"
+  >
     <div
       v-if="all_activities?.loading"
       class="flex flex-1 flex-col items-center justify-center gap-3 text-xl font-medium text-ink-gray-4"
     >
       <LoadingIndicator class="h-6 w-6" />
       <span>{{ __('Loading...') }}</span>
+    </div>
+    <div v-else-if="title == 'Events'" class="h-full activity">
+      <EventArea :doctype="doctype" :docname="docname" />
     </div>
     <div
       v-else-if="
@@ -41,7 +50,7 @@
           <NoteArea :note="note" v-model="all_activities" />
         </div>
       </div>
-      <div v-else-if="title == 'Comments'" class="pb-5">
+      <div v-else-if="title == 'FeedBacks'" class="pb-5">
         <div v-for="(comment, i) in activities">
           <div
             class="activity grid grid-cols-[30px_minmax(auto,_1fr)] gap-2 px-3 sm:gap-4 sm:px-10"
@@ -58,7 +67,13 @@
                 <CommentIcon class="text-ink-gray-8" />
               </div>
             </div>
-            <CommentArea class="mb-4" :activity="comment" />
+            <!-- تم تمرير fallback-doctype و fallback-name -->
+            <CommentArea
+              class="mb-4"
+              :activity="comment"
+              :fallback-doctype="doctype"
+              :fallback-name="docname"
+            />
           </div>
         </div>
       </div>
@@ -177,7 +192,12 @@
           :id="activity.name"
           v-else-if="activity.activity_type == 'comment'"
         >
-          <CommentArea :activity="activity" />
+          <!-- تم تمرير fallback-doctype و fallback-name هنا أيضًا -->
+          <CommentArea
+            :activity="activity"
+            :fallback-doctype="doctype"
+            :fallback-name="docname"
+          />
         </div>
         <div
           class="mb-4 flex flex-col gap-2 py-1.5"
@@ -432,6 +452,7 @@
   <AllModals
     ref="modalRef"
     v-model="all_activities"
+    v-model:events="events"
     :doctype="doctype"
     :doc="doc"
   />
@@ -460,11 +481,13 @@ import UserAvatar from '@/components/UserAvatar.vue'
 import ActivityIcon from '@/components/Icons/ActivityIcon.vue'
 import Email2Icon from '@/components/Icons/Email2Icon.vue'
 import DetailsIcon from '@/components/Icons/DetailsIcon.vue'
+import CalendarIcon from '@/components/Icons/CalendarIcon.vue'
 import PhoneIcon from '@/components/Icons/PhoneIcon.vue'
 import NoteIcon from '@/components/Icons/NoteIcon.vue'
 import TaskIcon from '@/components/Icons/TaskIcon.vue'
 import AttachmentIcon from '@/components/Icons/AttachmentIcon.vue'
 import WhatsAppIcon from '@/components/Icons/WhatsAppIcon.vue'
+import EventArea from '@/components/Activities/EventArea.vue'
 import WhatsAppArea from '@/components/Activities/WhatsAppArea.vue'
 import WhatsAppBox from '@/components/Activities/WhatsAppBox.vue'
 import LoadingIndicator from '@/components/Icons/LoadingIndicator.vue'
@@ -489,7 +512,7 @@ import { usersStore } from '@/stores/users'
 import { whatsappEnabled, callEnabled } from '@/composables/settings'
 import { useDocument } from '@/data/document'
 import { capture } from '@/telemetry'
-import { Button, Tooltip, createResource } from 'frappe-ui'
+import { Button, Tooltip, createResource, call } from 'frappe-ui'
 import { useElementVisibility } from '@vueuse/core'
 import {
   ref,
@@ -538,6 +561,16 @@ const showFilesUploader = ref(false)
 
 const title = computed(() => props.tabs?.[tabIndex.value]?.name || 'Activity')
 
+/** فلتر زر New: في تبويب Comments نسمح بـ comment فقط */
+const createFilter = computed(() => (title.value === 'Comments' ? ['comment'] : []))
+
+/** تنفيذ مباشر عند ضغط New من الهيدر */
+function onNewFromHeader() {
+  if (title.value === 'Comments' && emailBox.value) {
+    emailBox.value.showComment = true
+  }
+}
+
 const changeTabTo = (tabName) => {
   const tabNames = props.tabs?.map((tab) => tab.name?.toLowerCase())
   const index = tabNames?.indexOf(tabName)
@@ -572,9 +605,11 @@ const whatsappMessages = createResource({
 
 onBeforeUnmount(() => {
   $socket.off('whatsapp_message')
+  $socket.off('notification')
 })
 
 onMounted(() => {
+  // WhatsApp realtime
   $socket.on('whatsapp_message', (data) => {
     if (
       data.reference_doctype === props.doctype &&
@@ -582,6 +617,12 @@ onMounted(() => {
     ) {
       whatsappMessages.reload()
     }
+  })
+
+  // Notification realtime (من Reminder وغيره)
+  $socket.on('notification', () => {
+    all_activities.reload()
+    _document.reload()
   })
 
   nextTick(() => {
@@ -671,7 +712,8 @@ function sortByCreation(list) {
   return list.sort((a, b) => new Date(a.creation) - new Date(b.creation))
 }
 function sortByModified(list) {
-  return list.sort((b, a) => new Date(a.modified) - new Date(b.modified))
+  // تنازلي: الأحدث أولاً
+  return list.sort((a, b) => new Date(b.modified) - new Date(a.modified))
 }
 
 function update_activities_details(activity) {
@@ -700,7 +742,7 @@ const emptyText = computed(() => {
   if (title.value == 'Emails') {
     text = 'No Email Communications'
   } else if (title.value == 'Comments') {
-    text = 'No FeedBack'
+    text = 'No FeedBacks'
   } else if (title.value == 'Data') {
     text = 'No Data'
   } else if (title.value == 'Calls') {
@@ -751,6 +793,9 @@ function timelineIcon(activity_type, is_lead) {
     case 'comment':
       icon = CommentIcon
       break
+    case 'event':
+      icon = CalendarIcon
+      break
     case 'incoming_call':
       icon = InboundCallIcon
       break
@@ -770,17 +815,49 @@ function timelineIcon(activity_type, is_lead) {
 const emailBox = ref(null)
 const whatsappBox = ref(null)
 
+/** Helpers لواجهات Reminders */
+function clearDelayedFlags() {
+  createResource({
+    url: 'crm.api.reminders.clear_delayed_flags',
+    params: { doctype: props.doctype, name: props.docname },
+    auto: true,
+  })
+}
+
+async function recalcDelayedState() {
+  try {
+    await call('crm.api.reminders.recalc_delayed_for_doc', {
+      doctype: props.doctype,
+      name: props.docname,
+    })
+  } catch (e) {
+    console.debug('recalc_delayed_for_doc failed', e)
+  } finally {
+    all_activities.reload()
+  }
+}
+
+watch(title, (val) => {
+  if (val === 'FeedBacks') {
+    recalcDelayedState()
+  }
+})
+
 watch([reload, reload_email], ([reload_value, reload_email_value]) => {
   if (reload_value || reload_email_value) {
     all_activities.reload()
     _document.reload()
+    // لو ده Reload جاي بعد نشر تعليق → نظّف علامات التأخير
+    if (reload_email_value && title.value === 'Comments') {
+      nextTick(() => clearDelayedFlags())
+    }
     reload.value = false
     reload_email.value = false
   }
 })
 
 function scroll(hash) {
-  if (['tasks', 'notes'].includes(route.hash?.slice(1))) return
+  if (['tasks', 'notes', 'events'].includes(route.hash?.slice(1))) return
   setTimeout(() => {
     let el
     if (!hash) {
