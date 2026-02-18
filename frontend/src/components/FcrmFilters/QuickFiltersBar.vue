@@ -571,7 +571,6 @@ function runSearchLike() {
     const payload = [
       { fieldname: 'mobile_no',   value: q },
       { fieldname: 'phone',       value: q },
-      { fieldname: 'other_phone', value: q },
     ]
     console.debug('[QuickFiltersBar] runSearchLike: phone payload ->', payload)
     emit('like-change', payload)

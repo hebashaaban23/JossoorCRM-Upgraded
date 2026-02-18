@@ -45,7 +45,7 @@ export function getFormat(
   onlyTime = false,
   withDate = true,
 ) {
-  if (!date) return ''
+  if (!date && withDate) return ''
   let dateFormat =
     window.sysdefaults.date_format
       .replace('mm', 'MM')
@@ -235,46 +235,11 @@ export function taskPriorityOptions(action, data) {
   })
 }
 
-export function getSafeWebsiteUrl(rawUrl) {
-  const allowedProtocols = new Set(['http:', 'https:'])
-
-  if (!rawUrl) {
-    return null
-  }
-
-  const trimmedUrl = rawUrl.trim()
-
-  if (!trimmedUrl) {
-    return null
-  }
-
-  const urlToParse = /^[a-zA-Z][a-zA-Z\d+\-.]*:/.test(trimmedUrl)
-    ? trimmedUrl
-    : `https://${trimmedUrl}`
-
-  try {
-    const parsedUrl = new URL(urlToParse)
-
-    if (!allowedProtocols.has(parsedUrl.protocol)) {
-      return null
-    }
-
-    return parsedUrl.href
-  } catch (_error) {
-    return null
-  }
-}
-
 export function openWebsite(url) {
-  const safeUrl = getSafeWebsiteUrl(url)
-
-  if (!safeUrl) {
-    toast.error(__('Invalid website URL'))
-    return false
+  if (!url.startsWith('http://') && !url.startsWith('https://')) {
+    url = 'https://' + url
   }
-
-  window.open(safeUrl, '_blank', 'noopener')
-  return true
+  window.open(url, '_blank')
 }
 
 export function website(url) {
@@ -538,18 +503,18 @@ export function DropdownOption({ option, icon, selected }) {
       h('div', { class: 'flex gap-2' }, [
         icon
           ? h(FeatherIcon, {
-              name: icon,
-              class: ['h-4 w-4 shrink-0'],
-              'aria-hidden': true,
-            })
+            name: icon,
+            class: ['h-4 w-4 shrink-0'],
+            'aria-hidden': true,
+          })
           : null,
         h('span', { class: 'whitespace-nowrap' }, option),
       ]),
       selected
         ? h(LucideCheck, {
-            class: ['h-4 w-4 shrink-0 text-ink-gray-7'],
-            'aria-hidden': true,
-          })
+          class: ['h-4 w-4 shrink-0 text-ink-gray-7'],
+          'aria-hidden': true,
+        })
         : null,
     ],
   )
@@ -718,4 +683,34 @@ export function validateConditions(conditions) {
   }
 
   return conditions.length > 0
+}
+
+// sameArrayContents: returns true if both arrays have exactly the same elements
+// (including duplicate counts) irrespective of order.
+// Non-arrays or arrays of different length return false.
+export function sameArrayContents(a, b) {
+  if (a === b) return true
+  if (!Array.isArray(a) || !Array.isArray(b)) return false
+  if (a.length !== b.length) return false
+  if (a.length === 0) return true
+  const counts = new Map()
+  for (const v of a) {
+    counts.set(v, (counts.get(v) || 0) + 1)
+  }
+  for (const v of b) {
+    const c = counts.get(v)
+    if (!c) return false
+    if (c === 1) counts.delete(v)
+    else counts.set(v, c - 1)
+  }
+  return counts.size === 0
+}
+
+// orderSensitiveEqual: returns true only if arrays are strictly equal index-wise
+export function orderSensitiveEqual(a, b) {
+  if (a === b) return true
+  if (!Array.isArray(a) || !Array.isArray(b)) return false
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
+  return true
 }
