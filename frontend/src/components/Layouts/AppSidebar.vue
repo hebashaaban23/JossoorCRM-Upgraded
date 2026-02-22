@@ -113,7 +113,6 @@
       <div class="flex flex-col gap-2 mb-1">
         <SignupBanner v-if="isDemoSite" :isSidebarCollapsed="isSidebarCollapsed" :afterSignup="() => capture('signup_from_demo_site')" />
         <TrialBanner v-if="isFCSite" :isSidebarCollapsed="isSidebarCollapsed" :afterUpgrade="() => capture('upgrade_plan_from_trial_banner')" />
-        <GettingStartedBanner v-if="!isOnboardingStepsCompleted" :isSidebarCollapsed="isSidebarCollapsed" />
       </div>
 
       <SidebarLink
@@ -455,7 +454,7 @@ function getIcon(routeName, icon) {
 // onboarding
 const { user } = sessionStore()
 const { users, isManager, isSalesUser } = usersStore()
-const { isOnboardingStepsCompleted, setUp } = useOnboarding('frappecrm')
+//const { isOnboardingStepsCompleted, setUp } = useOnboarding('frappecrm')
 
 async function getFirstLead() {
   let firstLead = localStorage.getItem('firstLead' + user)
