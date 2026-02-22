@@ -1,13 +1,13 @@
 <template>
-  <div class="relative" @click.stop @mousedown.stop @dblclick.stop>
+  <div class="relative w-full" @click.stop @mousedown.stop @dblclick.stop>
     <!-- العرض المختصر -->
-    <div v-if="!open" class="flex items-start justify-between gap-2">
-      <div class="whitespace-pre-wrap break-words text-ink-gray-9 min-w-0">
+    <div v-if="!open" class="flex items-center justify-between gap-2 overflow-hidden w-full h-8">
+      <div class="truncate whitespace-nowrap text-ink-gray-9 flex-1 min-w-0 pr-2">
         {{ lastCommentText || __('No FeedBacks yet') }}
       </div>
       <button
         type="button"
-        class="px-2 py-1 text-ink-blue-7 underline hover:no-underline"
+        class="shrink-0 px-2 py-1 text-ink-blue-7 underline hover:no-underline text-sm"
         @click.stop="toggle(true)"
       >
         {{ __('Add') }}
@@ -108,6 +108,7 @@ const typeOptions = FEEDBACK_TYPES
 
 const props = defineProps({
   leadName: { type: String, required: true },
+  commentText: { type: String, default: '' },
 })
 
 const open = ref(false)
@@ -124,9 +125,12 @@ const addReminder = ref(false)
 /** آخر Reminder على الليد (للعرض أو المنطق لاحقًا) */
 const latestReminder = ref(null)
 
-const lastCommentText = computed(() =>
-  comments.value.length ? stripHtml(comments.value[0].content || '') : ''
-)
+const lastCommentText = computed(() => {
+  if (comments.value.length) {
+    return stripHtml(comments.value[0].content || '')
+  }
+  return stripHtml(props.commentText || '')
+})
 
 const canSubmit = computed(() => {
   // comment required
@@ -184,7 +188,7 @@ async function loadReminders() {
   latestReminder.value = null
 
   try {
-    const res = await call('crm.api.reminders.list_for_doc', {
+    const res = await call('crm.api.comment.list_for_doc', {
       doctype: 'CRM Lead',
       name: props.leadName,
     })
@@ -219,7 +223,7 @@ async function refreshDelayedState() {
 async function loadComments() {
   loading.value = true
   try {
-    const res = await call('crm.api.comments.list_for_doc', {
+    const res = await call('crm.api.comment.list_for_doc', {
       doctype: 'CRM Lead',
       name: props.leadName,
     })
@@ -326,8 +330,5 @@ async function addComment() {
   }
 }
 
-onMounted(async () => {
-  await refreshDelayedState()
-  await Promise.all([loadComments(), loadReminders()])
-})
+// Data is fetched via toggle() when user clicks "Add"
 </script>

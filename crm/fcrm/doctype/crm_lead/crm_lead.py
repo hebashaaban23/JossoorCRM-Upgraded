@@ -462,6 +462,7 @@ class CRMLead(Document):
 			"first_response_time",
 			"first_responded_on",
 			"modified",
+			"last_comment",
 			"_assign",
 			"image",
 		]
