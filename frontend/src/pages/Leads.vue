@@ -1215,7 +1215,7 @@ watch(
         key: 'last_comment',
         label: __('Latest Comment'),
         type: 'Data',
-        width: 600,
+        width: 300,
       })
     }
 

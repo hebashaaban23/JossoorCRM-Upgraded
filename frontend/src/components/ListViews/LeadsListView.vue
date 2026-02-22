@@ -50,12 +50,12 @@
         v-else-if="column.key === 'last_comment'"
         class="h-full w-full"
         :class="row.original_lead ? 'highlight-yellow' : ''"
-        @click.stop
-        @mousedown.stop
-        @mouseup.stop
-        @dblclick.stop
       >
-        <LeadCommentsQuick :leadName="row.name" />
+        <ListRowItem :item="item" :align="column.align">
+          <template #default>
+            <LeadCommentsQuick class="w-full" :leadName="row.name" :commentText="row.last_comment" />
+          </template>
+        </ListRowItem>
       </div>
 
       <div

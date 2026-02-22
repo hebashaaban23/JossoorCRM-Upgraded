@@ -214,3 +214,23 @@ def update_lead_last_comment(doc):
     except Exception:
         frappe.log_error(frappe.get_traceback(), "update_lead_last_comment failed")
 
+
+@frappe.whitelist()
+def list_for_doc(doctype: str, name: str) -> list[dict]:
+    """
+    Fetch comments for a specific document.
+    """
+    if not frappe.has_permission(doctype, "read", doc=name):
+        return []
+
+    return frappe.get_all(
+        "Comment",
+        filters={
+            "reference_doctype": doctype,
+            "reference_name": name,
+            "comment_type": "Comment",
+        },
+        fields=["name", "content", "creation", "owner", "comment_email", "comment_by", "delayed"],
+        order_by="creation desc",
+    )
+
