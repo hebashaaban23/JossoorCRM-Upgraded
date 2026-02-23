@@ -1,9 +1,9 @@
 <template>
   <div v-if="leadData" class="flex flex-col gap-6 p-6">
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 max-w-7xl mx-auto w-full">
-      <!-- Card 1: Property Details -->
+      <!-- Card 1: Location & Type -->
       <div class="bg-white border border-gray-100 rounded-xl shadow-sm p-6 flex flex-col h-full">
-        <h3 class="text-lg font-bold text-gray-800 mb-6">{{ __('Property Details') }}</h3>
+        <h3 class="text-lg font-bold text-gray-800 mb-6">{{ __('Location & Type') }}</h3>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
           <div v-for="fieldName in card1FieldNames" :key="fieldName">
             <Field v-if="getField(fieldName)" :field="getField(fieldName)" />
@@ -11,24 +11,19 @@
         </div>
       </div>
 
-      <!-- Card 2: Property Details (continued) - Custom layout for Pool/Garage -->
+      <!-- Card 2: Property Details -->
       <div class="bg-white border border-gray-100 rounded-xl shadow-sm p-6 flex flex-col h-full">
         <h3 class="text-lg font-bold text-gray-800 mb-6">{{ __('Property Details') }}</h3>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
-          <div v-for="fieldName in card2FieldNamesSubset" :key="fieldName">
+          <div v-for="fieldName in card2FieldNames" :key="fieldName">
             <Field v-if="getField(fieldName)" :field="getField(fieldName)" />
-          </div>
-          <!-- Pool and Garage side-by-side -->
-          <div class="sm:col-span-2 grid grid-cols-2 gap-6">
-             <Field v-if="getField('pool')" :field="getField('pool')" />
-             <Field v-if="getField('garage')" :field="getField('garage')" />
           </div>
         </div>
       </div>
 
-      <!-- Card 3: Property Details (Budget & Payment) -->
+      <!-- Card 3: Features & Financial -->
       <div class="bg-white border border-gray-100 rounded-xl shadow-sm p-6 flex flex-col h-full">
-        <h3 class="text-lg font-bold text-gray-800 mb-6">{{ __('Property Details') }}</h3>
+        <h3 class="text-lg font-bold text-gray-800 mb-6">{{ __('Features & Financial') }}</h3>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
           <div v-for="fieldName in card3FieldNames" :key="fieldName">
             <Field v-if="getField(fieldName)" :field="getField(fieldName)" />
@@ -138,26 +133,34 @@ const newNote = reactive({
 })
 
 const card1FieldNames = [
-  'territory',
-  'property_usage',
-  'residential_type',
-  'space',
-  'noof_bedrooms',
-  'noof_bathrooms',
-  'floor',
+  'property_city',
+  'property_region',
+  'property_type',
+  'property_subtype',
+  'property_relation',
+  'property_project',
 ]
 
-const card2FieldNamesSubset = [
-  'view',
-  'condition',
-  'finishing',
-  'built_year',
+const card2FieldNames = [
+  'property_space',
+  'property_floor',
+  'property_bedrooms',
+  'property_bathrooms',
+  'property_condition',
+  'property_decoration',
+  'property_year_built',
+  'property_delivery_date',
 ]
 
 const card3FieldNames = [
-  'budget',
-  'payment',
-  'ownership',
+  'property_view',
+  'property_finishing',
+  'property_features',
+  'property_min_price',
+  'property_max_price',
+  'property_payment',
+  'property_down_payment',
+  'property_ownership',
 ]
 
 async function fetchNotes() {
