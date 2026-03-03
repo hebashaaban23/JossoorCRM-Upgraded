@@ -322,7 +322,7 @@
    "fieldtype": "Link",
    "label": "Communication Status",
    "options": "CRM Communication Status",
-   "default": "Hot"
+   "default": "Open"
   },
   {
    "fieldname": "column_break_details_1",
