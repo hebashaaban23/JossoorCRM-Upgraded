@@ -112,22 +112,22 @@ const defaultActions = computed(() => {
       label: __('New FeedBack'),
       onClick: () => (props.emailBox.showComment = true),
     },
-    {
-      icon: h(PhoneIcon, { class: 'h-4 w-4' }),
-      label: __('Log a Call'),
-      onClick: () => props.modalRef.createCallLog(),
-    },
-    {
-      icon: h(PhoneIcon, { class: 'h-4 w-4' }),
-      label: __('Make a Call'),
-      onClick: () => makeCall(props.doc.mobile_no),
-      condition: () => callEnabled.value,
-    },
-    {
-      icon: h(NoteIcon, { class: 'h-4 w-4' }),
-      label: __('New Note'),
-      onClick: () => props.modalRef.showNote(),
-    },
+    //{
+    //  icon: h(PhoneIcon, { class: 'h-4 w-4' }),
+    //  label: __('Log a Call'),
+     // onClick: () => props.modalRef.createCallLog(),
+    //},
+    //{
+    //  icon: h(PhoneIcon, { class: 'h-4 w-4' }),
+    //  label: __('Make a Call'),
+    //  onClick: () => makeCall(props.doc.mobile_no),
+    //  condition: () => callEnabled.value,
+    //},
+    //{
+    //  icon: h(NoteIcon, { class: 'h-4 w-4' }),
+    //  label: __('New Note'),
+    //  onClick: () => props.modalRef.showNote(),
+    //},
     {
       icon: h(TaskIcon, { class: 'h-4 w-4' }),
       label: __('New Task'),

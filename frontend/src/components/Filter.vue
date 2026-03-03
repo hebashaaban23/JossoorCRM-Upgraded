@@ -152,6 +152,7 @@
     </template>
   </Popover>
 </template>
+
 <script setup>
 import FilterIcon from '@/components/Icons/FilterIcon.vue'
 import Link from '@/components/Controls/Link.vue'
@@ -193,10 +194,73 @@ const emit = defineEmits(['update'])
 
 const list = defineModel()
 
+// Fields that exist in CRM Lead JSON and are meaningful to filter by.
+// Excludes: structural fields (Tab Break, Section Break, Column Break),
+// read-only system fields, hidden fields, and fields not useful for filtering.
+const VALID_CRM_LEAD_FILTER_FIELDS = new Set([
+  // Lead Info
+  'lead_name',
+  'first_name',
+  'last_name',
+  'email',
+  'mobile_no',
+  'phone',
+  'lead_type',
+  'source',
+  'territory',
+  'lead_owner',
+  'status',
+  'communication_status',
+  'converted',
+  // Project / Unit
+  'project',
+  'project_unit',
+  'single_unit',
+  // Property Preferences
+  'property_city',
+  'property_region',
+  'property_type',
+  'property_subtype',
+  'property_space',
+  'property_floor',
+  // Property Details
+  'property_condition',
+  'property_decoration',
+  'property_relation',
+  'property_project',
+  'property_year_built',
+  'property_delivery_date',
+  // Room Details
+  'property_bedrooms',
+  'property_bathrooms',
+  'property_view',
+  'property_finishing',
+  'property_features',
+  // Financial
+  'property_min_price',
+  'property_max_price',
+  'property_payment',
+  'property_down_payment',
+  'property_ownership',
+  // Duplicate
+  'is_duplicate',
+  'original_lead',
+  // SLA
+  'sla_status',
+  // Syncing
+  'facebook_lead_id',
+  'facebook_form_id',
+])
+
 const filterableFields = createResource({
   url: 'crm.api.doc.get_filterable_fields',
   cache: ['filterableFields', props.doctype],
   params: { doctype: props.doctype },
+  // Post-process to only include fields valid for CRM Lead
+  transform(data) {
+    if (props.doctype !== 'CRM Lead') return data
+    return data.filter((f) => VALID_CRM_LEAD_FILTER_FIELDS.has(f.fieldname))
+  },
 })
 
 onMounted(() => {
@@ -209,7 +273,6 @@ const filters = computed(() => {
   let allFilters =
     list.value?.params?.filters || list.value.data?.params?.filters
   if (!allFilters || !filterableFields.data) return new Set()
-  // remove default filters
   if (props.default_filters) {
     allFilters = removeCommonFilters(props.default_filters, allFilters)
   }
@@ -223,10 +286,9 @@ const availableFilters = computed(() => {
   for (const filter of filters.value) {
     selectedFieldNames.add(filter.fieldname)
   }
-  
-  // also exclude explicitly excluded fields
+
   if (props.excluded_fields) {
-    props.excluded_fields.forEach(f => selectedFieldNames.add(f))
+    props.excluded_fields.forEach((f) => selectedFieldNames.add(f))
   }
 
   return filterableFields.data.filter(
@@ -284,7 +346,6 @@ function getOperators(fieldtype, fieldname) {
     )
   }
   if (fieldname === '_assign') {
-    // TODO: make equals and not equals work
     options = [
       { label: __('Like'), value: 'like' },
       { label: __('Not Like'), value: 'not like' },
@@ -371,14 +432,8 @@ function getValueControl(f) {
     return h(FormControl, {
       type: 'select',
       options: [
-        {
-          label: 'Set',
-          value: 'set',
-        },
-        {
-          label: 'Not Set',
-          value: 'not set',
-        },
+        { label: 'Set', value: 'set' },
+        { label: 'Not Set', value: 'not set' },
       ],
     })
   } else if (operator == 'timespan') {
@@ -465,7 +520,6 @@ function setfilter(data) {
 
 function updateFilter(data, index) {
   if (!data.fieldname) return
-
   filters.value.delete(Array.from(filters.value)[index])
   filters.value.add({
     fieldname: data.fieldname,
@@ -608,73 +662,22 @@ const oppositeOperatorMap = {
 }
 
 const timespanOptions = [
-  {
-    label: __('Last Week'),
-    value: 'last week',
-  },
-  {
-    label: __('Last Month'),
-    value: 'last month',
-  },
-  {
-    label: __('Last Quarter'),
-    value: 'last quarter',
-  },
-  {
-    label: __('Last 6 Months'),
-    value: 'last 6 months',
-  },
-  {
-    label: __('Last Year'),
-    value: 'last year',
-  },
-  {
-    label: __('Yesterday'),
-    value: 'yesterday',
-  },
-  {
-    label: __('Today'),
-    value: 'today',
-  },
-  {
-    label: __('Tomorrow'),
-    value: 'tomorrow',
-  },
-  {
-    label: __('This Week'),
-    value: 'this week',
-  },
-  {
-    label: __('This Month'),
-    value: 'this month',
-  },
-  {
-    label: __('This Quarter'),
-    value: 'this quarter',
-  },
-  {
-    label: __('This Year'),
-    value: 'this year',
-  },
-  {
-    label: __('Next Week'),
-    value: 'next week',
-  },
-  {
-    label: __('Next Month'),
-    value: 'next month',
-  },
-  {
-    label: __('Next Quarter'),
-    value: 'next quarter',
-  },
-  {
-    label: __('Next 6 Months'),
-    value: 'next 6 months',
-  },
-  {
-    label: __('Next Year'),
-    value: 'next year',
-  },
+  { label: __('Last Week'), value: 'last week' },
+  { label: __('Last Month'), value: 'last month' },
+  { label: __('Last Quarter'), value: 'last quarter' },
+  { label: __('Last 6 Months'), value: 'last 6 months' },
+  { label: __('Last Year'), value: 'last year' },
+  { label: __('Yesterday'), value: 'yesterday' },
+  { label: __('Today'), value: 'today' },
+  { label: __('Tomorrow'), value: 'tomorrow' },
+  { label: __('This Week'), value: 'this week' },
+  { label: __('This Month'), value: 'this month' },
+  { label: __('This Quarter'), value: 'this quarter' },
+  { label: __('This Year'), value: 'this year' },
+  { label: __('Next Week'), value: 'next week' },
+  { label: __('Next Month'), value: 'next month' },
+  { label: __('Next Quarter'), value: 'next quarter' },
+  { label: __('Next 6 Months'), value: 'next 6 months' },
+  { label: __('Next Year'), value: 'next year' },
 ]
 </script>

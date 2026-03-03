@@ -8,10 +8,103 @@ The `get_oauth_config` endpoint allows guest access for retrieving site-specific
 
 import frappe
 import os
+import base64
+import uuid
 from frappe import _
 from frappe.utils import today, getdate, nowdate, cint, strip_html, add_days
 from frappe.desk.form.assign_to import add as assign_task, remove as unassign_task
+from frappe.utils.file_manager import save_file
 
+
+def _clean_kwargs(doctype, kwargs):
+	"""
+	Remove Table fields from kwargs to prevent TypeError during doc.update()
+	when multimedia data is passed as strings.
+	"""
+	if not kwargs:
+		return
+		
+	meta = frappe.get_meta(doctype)
+	table_fields = [f.fieldname for f in meta.fields if f.fieldtype == "Table"]
+	
+	for field in table_fields:
+		if field in kwargs:
+			kwargs.pop(field)
+
+def handle_form_uploads(doc, fields=None):
+	"""
+	Handle multipart/form-data file uploads.
+	Checks frappe.request.files for keys matching the specified fields.
+	If found, saves the file and updates the document.
+	"""
+	if not frappe.request or not getattr(frappe.request, "files", None):
+		return
+
+	if fields is None:
+		# Auto-detect all Attach/Attach Image fields and Table fields
+		fields = [f.fieldname for f in doc.meta.fields if f.fieldtype in ["Attach", "Attach Image", "Table"]]
+
+	# Track if any files were processed to trigger save/reload
+	files_processed = False
+
+	# Handle regular Attach/Attach Image fields
+	for field in fields:
+		if field in frappe.request.files:
+			# Skip if it is a Table field, handled separately below
+			field_meta = doc.meta.get_field(field)
+			if field_meta and field_meta.fieldtype == "Table":
+				continue
+
+			file_obj = frappe.request.files[field]
+			if file_obj:
+				saved_file = save_file(
+					file_obj.filename,
+					file_obj.read(),
+					doc.doctype,
+					doc.name,
+					is_private=0
+				)
+				doc.db_set(field, saved_file.file_url)
+				files_processed = True
+	
+	if files_processed:
+		doc.reload()
+
+	# Handle child table uploads
+	# We iterate over all Table fields in the doctype to check if they are in request.files
+	for f_meta in doc.meta.fields:
+		if f_meta.fieldtype == "Table":
+			table_field = f_meta.fieldname
+			
+			# Check if this table field is in the request (allows uploading multiple files)
+			if table_field in frappe.request.files:
+				uploaded_files = frappe.request.files.getlist(table_field)
+				if uploaded_files:
+					# Find the attach field within the child doctype
+					child_doctype = f_meta.options
+					child_meta = frappe.get_meta(child_doctype)
+					child_attach_field = None
+					for child_f in child_meta.fields:
+						if child_f.fieldtype in ["Attach", "Attach Image"]:
+							child_attach_field = child_f.fieldname
+							break
+					
+					if child_attach_field:
+						for file_obj in uploaded_files:
+							saved_file = save_file(
+								file_obj.filename,
+								file_obj.read(),
+								doc.doctype, # Save file linked to parent doc
+								doc.name,
+								is_private=0
+							)
+							row = doc.append(table_field, {})
+							row.set(child_attach_field, saved_file.file_url)
+							files_processed = True
+
+	if files_processed:
+		doc.save()
+		doc.reload()
 
 def _safe_fields(dt, want):
 	"""
@@ -2019,63 +2112,87 @@ def get_current_user_role():
 
 
 @frappe.whitelist()
+def get_all_team_leaders():
+	"""
+	Get all Team Leaders defined in the Team doctype.
+	Returns a list of users who are assigned as team leaders in any Team.
+	"""
+	# Get all team leaders from Team doctype
+	teams = frappe.get_all("Team", fields=["team_leader"], distinct=True)
+	
+	leader_emails = [t.team_leader for t in teams if t.team_leader]
+	
+	if not leader_emails:
+		return []
+		
+	# Get user details
+	users = frappe.get_all(
+		"User",
+		filters={"name": ["in", leader_emails], "enabled": 1},
+		fields=["name", "email", "full_name", "user_image"],
+		order_by="full_name asc"
+	)
+	
+	return [
+		{
+			"email": u.email or u.name,
+			"name": u.full_name or u.name,
+			"profile_pic": u.user_image or None
+		}
+		for u in users
+	]
+
+
+@frappe.whitelist()
 def get_my_team_members():
 	"""
-	Get team members for the current user if they are a Team Leader.
-	
-	Returns:
-		{
-			"team_leader": String,        # Current user email
-			"team_name": String?,         # Team name (team_leader value)
-			"members": List[UserObject],  # List of team members
-			"count": int                  # Number of members
-		}
-		
-		If user is not a Team Leader:
-		{
-			"team_leader": String,
-			"team_name": None,
-			"members": [],
-			"count": 0,
-			"message": "User is not a Team Leader"
-		}
+	Get team members with email, name, and profile_pic.
+	If user is Sales Master Manager or System Manager, returns all system users.
+	If user is Team Leader, returns their team members.
 	"""
 	user = frappe.session.user
 	
 	if not user or user == "Guest":
-		return {
-			"team_leader": "Guest",
-			"team_name": None,
-			"members": [],
-			"count": 0,
-			"message": "Guest users cannot be Team Leaders"
-		}
+		return []
 	
-	# Find Team where current user is team_leader
+	roles = frappe.get_roles(user)
+	
+	# Admin roles: return ALL system users
+	if "Sales Master Manager" in roles or "System Manager" in roles:
+		all_users = frappe.get_all(
+			"User",
+			filters={
+				"enabled": 1,
+				"name": ["not in", ["Guest", "Administrator"]]
+			},
+			fields=["email", "full_name", "user_image"],
+			order_by="full_name asc"
+		)
+		return [
+			{
+				"email": u.email,
+				"name": u.full_name or u.email,
+				"profile_pic": u.user_image
+			}
+			for u in all_users
+		]
+	
+	# Team Leader: return team members only
 	teams = frappe.get_all(
 		"Team",
 		filters={"team_leader": user},
-		fields=["name", "team_leader"],
+		fields=["name"],
 		limit=1
 	)
 	
 	if not teams:
-		return {
-			"team_leader": user,
-			"team_name": None,
-			"members": [],
-			"count": 0,
-			"message": "User is not a Team Leader"
-		}
+		return []
 	
-	team = teams[0]
-	team_name = team.name
-	
-	# Get team members from Member child table
+	# Get team members
 	members = frappe.get_all(
 		"Member",
 		filters={
-			"parent": team_name,
+			"parent": teams[0].name,
 			"parenttype": "Team"
 		},
 		fields=["member"],
@@ -2083,41 +2200,21 @@ def get_my_team_members():
 	)
 	
 	# Get user details for each member
-	member_list = []
-	for member_row in members:
-		member_email = member_row.get("member")
-		if not member_email:
+	result = []
+	for m in members:
+		if not m.member:
 			continue
-		
 		try:
-			user_doc = frappe.get_doc("User", member_email)
-			member_data = {
-				"email": user_doc.email or member_email,
-				"name": user_doc.full_name or user_doc.name,
-			}
-			
-			# Get profile picture if available
-			if hasattr(user_doc, "user_image") and user_doc.user_image:
-				member_data["profile_pic"] = user_doc.user_image
-			elif hasattr(user_doc, "photo") and user_doc.photo:
-				member_data["profile_pic"] = user_doc.photo
-			else:
-				member_data["profile_pic"] = None
-			
-			member_list.append(member_data)
-		except frappe.DoesNotExistError:
-			# User doesn't exist, skip
-			continue
-		except Exception:
-			# Error fetching user, skip
+			u = frappe.get_doc("User", m.member)
+			result.append({
+				"email": u.email,
+				"name": u.full_name or u.email,
+				"profile_pic": u.user_image
+			})
+		except:
 			continue
 	
-	return {
-		"team_leader": user,
-		"team_name": team_name,
-		"members": member_list,
-		"count": len(member_list)
-	}
+	return result
 
 
 def get_compact_lead(lead, return_all_fields=False):
@@ -2444,9 +2541,11 @@ def create_lead(lead_name=None, first_name=None, last_name=None, middle_name=Non
 		if key in valid_fields and hasattr(lead_doc, key) and value is not None:
 			setattr(lead_doc, key, value)
 	
+	# Skip auto-assignment in after_insert since we handle it below
+	lead_doc.flags.skip_auto_assign = True
+	
 	# Insert lead
 	lead_doc.insert()
-	frappe.db.commit()
 	
 	# Handle comment (if provided)
 	comment_text = comment or comment_content
@@ -2466,7 +2565,6 @@ def create_lead(lead_name=None, first_name=None, last_name=None, middle_name=Non
 				comment_email=comment_email,
 				comment_by=comment_by
 			)
-			frappe.db.commit()
 		except Exception as e:
 			# Log error but don't fail the lead creation
 			frappe.log_error(f"Error adding comment to lead {lead_doc.name}: {str(e)}", "create_lead_comment_error")
@@ -2545,9 +2643,7 @@ def create_lead(lead_name=None, first_name=None, last_name=None, middle_name=Non
 		# Check if assigned_date is already set
 		current_assigned_date = frappe.db.get_value("CRM Lead", lead_doc.name, "assigned_date")
 		if not current_assigned_date:
-			# Use db.set_value for direct database update
 			frappe.db.set_value("CRM Lead", lead_doc.name, "assigned_date", today())
-			frappe.db.commit()
 	
 	for user_email in users_to_assign:
 		try:
@@ -4832,3 +4928,1739 @@ def get_task_with_reminder(task_id=None, name=None):
     except Exception as e:
         frappe.log_error(f"Error fetching task with reminder: {str(e)}", "Get Task With Reminder Error")
         frappe.throw(_("Failed to fetch task: {0}").format(str(e)))
+
+
+def get_compact_project(project, return_all_fields=False):
+	"""
+	Return project representation.
+	Accepts both Document objects and dict-like objects.
+	"""
+	def _get(obj, key, default=None):
+		if isinstance(obj, dict):
+			return obj.get(key, default)
+		return getattr(obj, key, default)
+	
+	project_name = project.name if hasattr(project, "name") else project.get("name")
+	
+	if return_all_fields:
+		result = {}
+		if isinstance(project, dict):
+			for key, value in project.items():
+				if key not in ['doctype']:
+					result[key] = value
+			if 'description' in result and result['description']:
+				result['description'] = strip_html(result['description']).strip()
+		else:
+			# Document object
+			# Use as_dict() to get all fields including child tables
+			result = project.as_dict()
+			
+			# Clean description
+			if 'description' in result and result['description']:
+				result['description'] = strip_html(result['description']).strip()
+	else:
+		result = {
+			"name": project_name,
+			"project_name": _get(project, "project_name"),
+			"status": _get(project, "status"),
+			"developer": _get(project, "developer"),
+			"location": _get(project, "location"),
+			"min_price": _get(project, "min_price"),
+			"max_price": _get(project, "max_price"),
+			"cover_image": _get(project, "cover_image"),
+			"city": _get(project, "city"),
+			"district": _get(project, "district")
+		}
+	
+	return result
+
+
+@frappe.whitelist()
+def get_all_projects(page=1, limit=20, order_by="modified desc",
+					 status=None, developer=None, location=None,
+					 min_price_from=None, min_price_to=None,
+					 max_price_from=None, max_price_to=None,
+					 project_name=None, city=None, district=None,
+					 categories=None, exclusivity=None, furnishing=None,
+					 **kwargs):
+	"""
+	Get all Real Estate Projects with pagination and filtering.
+	"""
+	if hasattr(frappe, 'form_dict') and frappe.form_dict:
+		status = frappe.form_dict.get('status') if 'status' in frappe.form_dict else status
+		developer = frappe.form_dict.get('developer') if 'developer' in frappe.form_dict else developer
+		location = frappe.form_dict.get('location') if 'location' in frappe.form_dict else location
+		min_price_from = frappe.form_dict.get('min_price_from') if 'min_price_from' in frappe.form_dict else min_price_from
+		min_price_to = frappe.form_dict.get('min_price_to') if 'min_price_to' in frappe.form_dict else min_price_to
+		max_price_from = frappe.form_dict.get('max_price_from') if 'max_price_from' in frappe.form_dict else max_price_from
+		max_price_to = frappe.form_dict.get('max_price_to') if 'max_price_to' in frappe.form_dict else max_price_to
+		project_name = frappe.form_dict.get('project_name') if 'project_name' in frappe.form_dict else project_name
+		city = frappe.form_dict.get('city') if 'city' in frappe.form_dict else city
+		district = frappe.form_dict.get('district') if 'district' in frappe.form_dict else district
+		categories = frappe.form_dict.get('categories') if 'categories' in frappe.form_dict else categories
+		exclusivity = frappe.form_dict.get('exclusivity') if 'exclusivity' in frappe.form_dict else exclusivity
+		furnishing = frappe.form_dict.get('furnishing') if 'furnishing' in frappe.form_dict else furnishing
+		page = frappe.form_dict.get('page') if 'page' in frappe.form_dict else page
+		limit = frappe.form_dict.get('limit') if 'limit' in frappe.form_dict else limit
+		order_by = frappe.form_dict.get('order_by') if 'order_by' in frappe.form_dict else order_by
+
+	page = cint(page) or 1
+	limit = cint(limit) or 20
+	if page < 1: page = 1
+	if limit < 1: limit = 20
+	if limit > 100: limit = 100
+	
+	start = (page - 1) * limit
+	
+	filters = []
+	
+	if status and str(status).strip():
+		statuses = [s.strip() for s in status.split(",") if s.strip()]
+		if statuses:
+			if len(statuses) == 1:
+				filters.append(["status", "=", statuses[0]])
+			else:
+				filters.append(["status", "in", statuses])
+				
+	if developer and str(developer).strip():
+		filters.append(["developer", "like", f"%{developer}%"])
+		
+	if location and str(location).strip():
+		filters.append(["location", "like", f"%{location}%"])
+		
+	if project_name and str(project_name).strip():
+		filters.append(["project_name", "like", f"%{project_name}%"])
+		
+	if city and str(city).strip():
+		filters.append(["city", "like", f"%{city}%"])
+		
+	if district and str(district).strip():
+		filters.append(["district", "like", f"%{district}%"])
+
+	if categories and str(categories).strip():
+		cat_list = [c.strip() for c in categories.split(",") if c.strip()]
+		if cat_list:
+			if len(cat_list) == 1:
+				filters.append(["categories", "=", cat_list[0]])
+			else:
+				filters.append(["categories", "in", cat_list])
+				
+	if exclusivity and str(exclusivity).strip():
+		filters.append(["exclusivity", "=", exclusivity])
+		
+	if furnishing and str(furnishing).strip():
+		filters.append(["furnishing", "=", furnishing])
+
+	if min_price_from:
+		filters.append(["min_price", ">=", float(min_price_from)])
+	if min_price_to:
+		filters.append(["min_price", "<=", float(min_price_to)])
+		
+	if max_price_from:
+		filters.append(["max_price", ">=", float(max_price_from)])
+	if max_price_to:
+		filters.append(["max_price", "<=", float(max_price_to)])
+
+	# Get total count
+	total = frappe.db.count("Real Estate Project", filters=filters if filters else None)
+	
+	# Get all fields
+	meta = frappe.get_meta("Real Estate Project")
+	all_fieldnames = [f.fieldname for f in meta.fields 
+					  if f.fieldtype not in ['Tab Break', 'Section Break', 'Column Break', 'Table']]
+	if 'name' not in all_fieldnames:
+		all_fieldnames.insert(0, 'name')
+		
+	fields = _safe_fields("Real Estate Project", all_fieldnames)
+	
+	projects = frappe.get_all(
+		"Real Estate Project",
+		filters=filters if filters else None,
+		fields=["*"],
+		order_by=order_by,
+		limit_start=start,
+		limit_page_length=limit
+	)
+	
+	# Collect project names for batch query
+	project_names = [p.name for p in projects]
+	
+	unit_counts = {}
+	project_galleries = {}
+	project_layouts = {}
+	
+	if project_names:
+		# Efficiently fetch counts grouped by project and availability
+		counts_data = frappe.db.sql("""
+			SELECT project, availability, COUNT(*) as count
+			FROM `tabProject Unit`
+			WHERE project IN %(projects)s
+			GROUP BY project, availability
+		""", {"projects": project_names}, as_dict=True)
+		
+		# Organize counts by project
+		for row in counts_data:
+			if row.project not in unit_counts:
+				unit_counts[row.project] = {
+					"Available unit": 0,
+					"Reserved unit": 0,
+					"Sold unit": 0
+				}
+			
+			key = f"{row.availability} unit" if row.availability else "Available unit"
+			if row.availability == "Available": key = "Available unit"
+			elif row.availability == "Reserved": key = "Reserved unit"
+			elif row.availability == "Sold": key = "Sold unit"
+			
+			if key in unit_counts[row.project]:
+				unit_counts[row.project][key] = row.count
+
+		# Fetch Gallery (Project Image)
+		galleries = frappe.get_all("Project Image", 
+			filters={"parent": ["in", project_names], "parentfield": "gallery"}, 
+			fields=["*"], 
+			order_by="idx asc")
+		for g in galleries:
+			if g.parent not in project_galleries:
+				project_galleries[g.parent] = []
+			project_galleries[g.parent].append(g)
+
+		# Fetch Layouts
+		layouts = frappe.get_all("Layouts", 
+			filters={"parent": ["in", project_names], "parentfield": "layout"}, 
+			fields=["*"], 
+			order_by="idx asc")
+		for l in layouts:
+			if l.parent not in project_layouts:
+				project_layouts[l.parent] = []
+			project_layouts[l.parent].append(l)
+
+	data = []
+	for p in projects:
+		project_data = get_compact_project(p, return_all_fields=True)
+		
+		# Add counts
+		counts = unit_counts.get(p.name, {
+			"Available unit": 0,
+			"Reserved unit": 0,
+			"Sold unit": 0
+		})
+		project_data.update(counts)
+		
+		# Add Child Tables
+		project_data['gallery'] = project_galleries.get(p.name, [])
+		project_data['layout'] = project_layouts.get(p.name, [])
+		
+		data.append(project_data)
+	
+	total_pages = (total + limit - 1) // limit if total > 0 else 0
+	has_next = (start + len(data)) < total
+	has_previous = page > 1
+	
+	return {
+		"message": {
+			"data": data,
+			"page": page,
+			"page_size": limit,
+			"total": total,
+			"total_pages": total_pages,
+			"has_next": has_next,
+			"has_previous": has_previous
+		}
+	}
+
+
+@frappe.whitelist()
+def get_project_by_id(project_id=None, name=None):
+	"""
+	Get a single Real Estate Project by ID (or project_name).
+	"""
+	pid = project_id or name
+	if not pid:
+		frappe.throw(_("Project ID is required"))
+		
+	if not frappe.db.exists("Real Estate Project", pid):
+		frappe.throw(_("Project not found"))
+		
+	doc = frappe.get_doc("Real Estate Project", pid)
+	project_dict = get_compact_project(doc, return_all_fields=True)
+	
+	# Fetch Unit Counts
+	counts_data = frappe.db.sql("""
+		SELECT availability, COUNT(*) as count
+		FROM `tabProject Unit`
+		WHERE project = %(project)s
+		GROUP BY availability
+	""", {"project": pid}, as_dict=True)
+	
+	counts = {
+		"Available unit": 0,
+		"Reserved unit": 0,
+		"Sold unit": 0
+	}
+	
+	for row in counts_data:
+		key = f"{row.availability} unit" if row.availability else "Available unit"
+		# Ensure key matches desired format strictly
+		if row.availability == "Available": key = "Available unit"
+		elif row.availability == "Reserved": key = "Reserved unit"
+		elif row.availability == "Sold": key = "Sold unit"
+		
+		if key in counts:
+			counts[key] = row.count
+			
+	project_dict.update(counts)
+			
+	return {
+		"message": project_dict
+	}
+
+
+@frappe.whitelist()
+def create_project(**kwargs):
+	"""
+	Create a new Real Estate Project.
+	Supports base64 encoded images for cover_image and logo fields.
+	"""
+	try:
+		_clean_kwargs("Real Estate Project", kwargs)
+		doc = frappe.new_doc("Real Estate Project")
+		doc.update(kwargs)
+		doc.insert()
+		
+		# Handle form file uploads
+		handle_form_uploads(doc)
+		
+		# Return compact project instead of full doc to ensure files are included
+		return get_compact_project(doc, return_all_fields=True)
+	except Exception as e:
+		frappe.log_error(f"Error creating project: {str(e)}", "Create Project Error")
+		frappe.throw(_("Failed to create project: {0}").format(str(e)))
+
+
+
+@frappe.whitelist()
+def update_project(project_id, **kwargs):
+	"""
+	Update an existing Real Estate Project.
+	"""
+	if not project_id:
+		frappe.throw(_("Project ID is required"))
+	
+	try:
+		doc = frappe.get_doc("Real Estate Project", project_id)
+		_clean_kwargs("Real Estate Project", kwargs)
+		doc.update(kwargs)
+		doc.save()
+		
+		# Handle form file uploads
+		handle_form_uploads(doc)
+
+		return get_compact_project(doc, return_all_fields=True)
+	except Exception as e:
+		frappe.log_error(f"Error updating project: {str(e)}", "Update Project Error")
+		frappe.throw(_("Failed to update project: {0}").format(str(e)))
+
+
+@frappe.whitelist()
+def delete_project(project_id):
+	"""
+	Delete a Real Estate Project.
+	"""
+	if not project_id:
+		frappe.throw(_("Project ID is required"))
+		
+	try:
+		frappe.delete_doc("Real Estate Project", project_id)
+		return {"status": "success", "message": _("Project deleted successfully")}
+	except Exception as e:
+		frappe.log_error(f"Error deleting project: {str(e)}", "Delete Project Error")
+		frappe.throw(_("Failed to delete project: {0}").format(str(e)))
+# ==============================================================================
+# Project Unit APIs
+# ==============================================================================
+
+def get_compact_project_unit(unit, return_all_fields=False):
+	"""
+	Return project unit representation.
+	"""
+	def _get(obj, key, default=None):
+		if isinstance(obj, dict):
+			return obj.get(key, default)
+		return getattr(obj, key, default)
+	
+	unit_name = unit.name if hasattr(unit, "name") else unit.get("name")
+	
+	if return_all_fields:
+		result = {}
+		if isinstance(unit, dict):
+			for key, value in unit.items():
+				if key not in ['doctype'] and value is not None:
+					result[key] = value
+					
+			# Ensure cover_image is present even if None
+			if 'cover_image' not in result:
+				result['cover_image'] = unit.get('cover_image')
+
+			if 'description' in result and result['description']:
+				result['description'] = strip_html(result['description']).strip()
+		else:
+			for field in unit.meta.fields:
+				fieldname = field.fieldname
+				if fieldname in ['doctype']:
+					continue
+				if field.fieldtype == 'Table':
+					continue
+				value = getattr(unit, fieldname, None)
+				important_fields = ['name', 'modified', 'creation', 'owner', 'modified_by', 'description']
+				if value is not None or fieldname in important_fields:
+					result[fieldname] = value
+			
+			result['name'] = unit.name
+			if hasattr(unit, 'modified'):
+				result['modified'] = unit.modified
+			if hasattr(unit, 'creation'):
+				result['creation'] = unit.creation
+			if hasattr(unit, 'owner'):
+				result['owner'] = unit.owner
+			if hasattr(unit, 'modified_by'):
+				result['modified_by'] = unit.modified_by
+			
+			# Ensure cover_image is present even if None
+			if 'cover_image' not in result:
+				result['cover_image'] = getattr(unit, 'cover_image', None)
+
+			if 'description' in result and result['description']:
+				result['description'] = strip_html(result['description']).strip()
+		
+		# Expand Project Name
+		project_id = result.get('project')
+		if project_id:
+			try:
+				p = frappe.get_doc("Real Estate Project", project_id)
+				result['project_name'] = p.project_name
+			except:
+				pass
+	else:
+		result = {
+			"name": unit_name,
+			"unit_name": _get(unit, "unit_name"),
+			"project": _get(unit, "project"),
+			"type": _get(unit, "type"),
+			"price": _get(unit, "price"),
+			"area_sqm": _get(unit, "area_sqm"),
+			"bedrooms": _get(unit, "bedrooms"),
+			"bathrooms": _get(unit, "bathrooms"),
+			"status": _get(unit, "status"),
+			"cover_image": _get(unit, "cover_image")
+		}
+	
+	return result
+
+
+@frappe.whitelist()
+def get_all_project_units(page=1, limit=20, order_by="modified desc",
+						  project=None, type=None, status=None,
+						  min_price=None, max_price=None,
+						  min_area=None, max_area=None,
+						  bedrooms=None, bathrooms=None,
+						  categories=None, furnishing=None,
+						  **kwargs):
+	"""
+	Get all Project Units with pagination and filtering.
+	"""
+	if hasattr(frappe, 'form_dict') and frappe.form_dict:
+		project = frappe.form_dict.get('project') if 'project' in frappe.form_dict else project
+		type = frappe.form_dict.get('type') if 'type' in frappe.form_dict else type
+		status = frappe.form_dict.get('status') if 'status' in frappe.form_dict else status
+		min_price = frappe.form_dict.get('min_price') if 'min_price' in frappe.form_dict else min_price
+		max_price = frappe.form_dict.get('max_price') if 'max_price' in frappe.form_dict else max_price
+		min_area = frappe.form_dict.get('min_area') if 'min_area' in frappe.form_dict else min_area
+		max_area = frappe.form_dict.get('max_area') if 'max_area' in frappe.form_dict else max_area
+		bedrooms = frappe.form_dict.get('bedrooms') if 'bedrooms' in frappe.form_dict else bedrooms
+		bathrooms = frappe.form_dict.get('bathrooms') if 'bathrooms' in frappe.form_dict else bathrooms
+		categories = frappe.form_dict.get('categories') if 'categories' in frappe.form_dict else categories
+		furnishing = frappe.form_dict.get('furnished') if 'furnished' in frappe.form_dict else furnishing
+		page = frappe.form_dict.get('page') if 'page' in frappe.form_dict else page
+		limit = frappe.form_dict.get('limit') if 'limit' in frappe.form_dict else limit
+		order_by = frappe.form_dict.get('order_by') if 'order_by' in frappe.form_dict else order_by
+
+	page = cint(page) or 1
+	limit = cint(limit) or 20
+	if page < 1: page = 1
+	if limit < 1: limit = 20
+	if limit > 100: limit = 100
+	
+	start = (page - 1) * limit
+	
+	filters = []
+	
+	if project and str(project).strip():
+		# Can filter by project name or ID
+		if frappe.db.exists("Real Estate Project", project):
+			filters.append(["project", "=", project])
+		else:
+			p_doc = frappe.get_all("Real Estate Project", filters={"project_name": project}, limit=1)
+			if p_doc:
+				filters.append(["project", "=", p_doc[0].name])
+	
+	if type and str(type).strip():
+		filters.append(["type", "=", type])
+		
+	if status and str(status).strip():
+		statuses = [s.strip() for s in status.split(",") if s.strip()]
+		if statuses:
+			if len(statuses) == 1:
+				filters.append(["status", "=", statuses[0]])
+			else:
+				filters.append(["status", "in", statuses])
+
+	if min_price:
+		filters.append(["price", ">=", float(min_price)])
+	if max_price:
+		filters.append(["price", "<=", float(max_price)])
+		
+	if min_area:
+		filters.append(["area_sqm", ">=", float(min_area)])
+	if max_area:
+		filters.append(["area_sqm", "<=", float(max_area)])
+
+	if bedrooms:
+		filters.append(["bedrooms", "=", int(bedrooms)])
+	if bathrooms:
+		filters.append(["bathrooms", "=", int(bathrooms)])
+		
+	if categories and str(categories).strip():
+		filters.append(["categories", "=", categories])
+		
+	if furnishing and str(furnishing).strip():
+		filters.append(["furnished", "=", furnishing])
+
+	# Get total count
+	total = frappe.db.count("Project Unit", filters=filters if filters else None)
+	
+	# Get all fields
+	meta = frappe.get_meta("Project Unit")
+	all_fieldnames = [f.fieldname for f in meta.fields 
+					  if f.fieldtype not in ['Tab Break', 'Section Break', 'Column Break', 'Table']]
+	if 'name' not in all_fieldnames:
+		all_fieldnames.insert(0, 'name')
+		
+	fields = _safe_fields("Project Unit", all_fieldnames)
+	
+	units = frappe.get_all(
+		"Project Unit",
+		filters=filters if filters else None,
+		fields=["*"],
+		order_by=order_by,
+		limit_start=start,
+		limit_page_length=limit
+	)
+	
+	data = []
+	
+	# Prepare list of unit names for batch fetching
+	unit_names = [u.name for u in units]
+	
+	# Fetch Assignments
+	assignments = {}
+	if unit_names:
+		todos = frappe.db.sql("""
+			SELECT reference_name, owner 
+			FROM `tabToDo` 
+			WHERE reference_type = 'Project Unit'
+			AND reference_name IN %(names)s
+			AND status != 'Cancelled'
+		""", {"names": unit_names}, as_dict=True)
+		
+		for t in todos:
+			if t.reference_name not in assignments:
+				assignments[t.reference_name] = []
+			if t.owner not in assignments[t.reference_name]:
+				assignments[t.reference_name].append(t.owner)
+
+	for u in units:
+		unit_dict = get_compact_project_unit(u, return_all_fields=True)
+		# ensure cover_image is there (it should be with *) via return_all_fields
+		
+		# Add assignees
+		unit_dict['_assign'] = assignments.get(u.name, [])
+		
+		data.append(unit_dict)
+	
+	total_pages = (total + limit - 1) // limit if total > 0 else 0
+	has_next = (start + len(data)) < total
+	has_previous = page > 1
+	
+	return {
+		"message": {
+			"data": data,
+			"page": page,
+			"page_size": limit,
+			"total": total,
+			"total_pages": total_pages,
+			"has_next": has_next,
+			"has_previous": has_previous
+		}
+	}
+
+
+@frappe.whitelist()
+def get_project_unit_by_id(unit_id=None, name=None):
+	"""
+	Get a single Project Unit by ID.
+	"""
+	uid = unit_id or name
+	if not uid:
+		frappe.throw(_("Unit ID is required"))
+		
+	if not frappe.db.exists("Project Unit", uid):
+		frappe.throw(_("Project Unit not found"))
+		
+	doc = frappe.get_doc("Project Unit", uid)
+	unit_dict = doc.as_dict()
+			
+	return {
+		"message": unit_dict
+	}
+
+
+@frappe.whitelist()
+def create_project_unit(**kwargs):
+	"""
+	Create a new Project Unit.
+	Supports base64 encoded images for cover_image field.
+	"""
+	try:
+		_clean_kwargs("Project Unit", kwargs)
+		doc = frappe.new_doc("Project Unit")
+		doc.update(kwargs)
+		doc.insert()
+		
+		# Handle form file uploads
+		handle_form_uploads(doc)
+		
+		return doc.as_dict()
+	except Exception as e:
+		frappe.log_error(f"Error creating project unit: {str(e)}", "Create Project Unit Error")
+		frappe.throw(_("Failed to create project unit: {0}").format(str(e)))
+
+
+
+@frappe.whitelist()
+def update_project_unit(unit_id, **kwargs):
+	"""
+	Update an existing Project Unit.
+	"""
+	if not unit_id:
+		frappe.throw(_("Unit ID is required"))
+	
+	try:
+		doc = frappe.get_doc("Project Unit", unit_id)
+		_clean_kwargs("Project Unit", kwargs)
+		doc.update(kwargs)
+		doc.save()
+		
+		# Handle form file uploads
+		handle_form_uploads(doc)
+
+		return doc.as_dict()
+	except Exception as e:
+		frappe.log_error(f"Error updating project unit: {str(e)}", "Update Project Unit Error")
+		frappe.throw(_("Failed to update project unit: {0}").format(str(e)))
+
+
+@frappe.whitelist()
+def delete_project_unit(unit_id):
+	"""
+	Delete a Project Unit.
+	"""
+	if not unit_id:
+		frappe.throw(_("Unit ID is required"))
+		
+	try:
+		frappe.delete_doc("Project Unit", unit_id)
+		return {"status": "success", "message": _("Project Unit deleted successfully")}
+	except Exception as e:
+		frappe.log_error(f"Error deleting project unit: {str(e)}", "Delete Project Unit Error")
+		frappe.throw(_("Failed to delete project unit: {0}").format(str(e)))
+
+
+# ==============================================================================
+# Unit APIs (Standalone Units)
+# ==============================================================================
+
+def get_compact_unit(unit, return_all_fields=False):
+	"""
+	Return standalone unit representation.
+	"""
+	def _get(obj, key, default=None):
+		if isinstance(obj, dict):
+			return obj.get(key, default)
+		return getattr(obj, key, default)
+	
+	unit_name = unit.name if hasattr(unit, "name") else unit.get("name")
+	
+	if return_all_fields:
+		result = {}
+		if isinstance(unit, dict):
+			for key, value in unit.items():
+				if key not in ['doctype'] and value is not None:
+					result[key] = value
+			
+			# Ensure cover_image is present even if None
+			if 'cover_image' not in result:
+				result['cover_image'] = unit.get('cover_image')
+
+			if 'description' in result and result['description']:
+				result['description'] = strip_html(result['description']).strip()
+		else:
+			# Document object
+			result = unit.as_dict()
+			
+			# Ensure cover_image is present even if None
+			if 'cover_image' not in result:
+				result['cover_image'] = getattr(unit, 'cover_image', None)
+
+			if 'description' in result and result['description']:
+				result['description'] = strip_html(result['description']).strip()
+	else:
+		result = {
+			"name": unit_name,
+			"unit_name": _get(unit, "unit_name"),
+			"type": _get(unit, "type"),
+			"price": _get(unit, "price"),
+			"area_sqm": _get(unit, "area_sqm"),
+			"city": _get(unit, "city"),
+			"headlines": _get(unit, "headlines"),
+			"status": _get(unit, "status"),
+			"cover_image": _get(unit, "cover_image")
+		}
+	
+	return result
+
+
+@frappe.whitelist()
+def get_all_units(page=1, limit=20, order_by="modified desc",
+				  city=None, type=None, status=None,
+				  min_price=None, max_price=None,
+				  min_area=None, max_area=None,
+				  bedrooms=None, bathrooms=None,
+				  categories=None, furnishing=None,
+				  **kwargs):
+	"""
+	Get all Standalone Units with pagination and filtering.
+	"""
+	if hasattr(frappe, 'form_dict') and frappe.form_dict:
+		city = frappe.form_dict.get('city') if 'city' in frappe.form_dict else city
+		type = frappe.form_dict.get('type') if 'type' in frappe.form_dict else type
+		status = frappe.form_dict.get('status') if 'status' in frappe.form_dict else status
+		min_price = frappe.form_dict.get('min_price') if 'min_price' in frappe.form_dict else min_price
+		max_price = frappe.form_dict.get('max_price') if 'max_price' in frappe.form_dict else max_price
+		min_area = frappe.form_dict.get('min_area') if 'min_area' in frappe.form_dict else min_area
+		max_area = frappe.form_dict.get('max_area') if 'max_area' in frappe.form_dict else max_area
+		bedrooms = frappe.form_dict.get('bedrooms') if 'bedrooms' in frappe.form_dict else bedrooms
+		bathrooms = frappe.form_dict.get('bathrooms') if 'bathrooms' in frappe.form_dict else bathrooms
+		categories = frappe.form_dict.get('categories') if 'categories' in frappe.form_dict else categories
+		furnishing = frappe.form_dict.get('furnished') if 'furnished' in frappe.form_dict else furnishing
+		page = frappe.form_dict.get('page') if 'page' in frappe.form_dict else page
+		limit = frappe.form_dict.get('limit') if 'limit' in frappe.form_dict else limit
+		order_by = frappe.form_dict.get('order_by') if 'order_by' in frappe.form_dict else order_by
+
+	page = cint(page) or 1
+	limit = cint(limit) or 20
+	if page < 1: page = 1
+	if limit < 1: limit = 20
+	if limit > 100: limit = 100
+	
+	start = (page - 1) * limit
+	
+	filters = []
+	
+	if city and str(city).strip():
+		filters.append(["city", "like", f"%{city}%"])
+	
+	if type and str(type).strip():
+		filters.append(["type", "=", type])
+		
+	if status and str(status).strip():
+		statuses = [s.strip() for s in status.split(",") if s.strip()]
+		if statuses:
+			if len(statuses) == 1:
+				filters.append(["status", "=", statuses[0]])
+			else:
+				filters.append(["status", "in", statuses])
+
+	if min_price:
+		filters.append(["price", ">=", float(min_price)])
+	if max_price:
+		filters.append(["price", "<=", float(max_price)])
+		
+	if min_area:
+		filters.append(["area_sqm", ">=", float(min_area)])
+	if max_area:
+		filters.append(["area_sqm", "<=", float(max_area)])
+
+	if bedrooms:
+		filters.append(["bedrooms", "=", int(bedrooms)])
+	if bathrooms:
+		filters.append(["bathrooms", "=", int(bathrooms)])
+		
+	if categories and str(categories).strip():
+		filters.append(["categories", "=", categories])
+		
+	if furnishing and str(furnishing).strip():
+		filters.append(["furnished", "=", furnishing])
+
+	# Get total count
+	total = frappe.db.count("Unit", filters=filters if filters else None)
+	
+	# Get all fields
+	meta = frappe.get_meta("Unit")
+	all_fieldnames = [f.fieldname for f in meta.fields 
+					  if f.fieldtype not in ['Tab Break', 'Section Break', 'Column Break', 'Table']]
+	if 'name' not in all_fieldnames:
+		all_fieldnames.insert(0, 'name')
+		
+	fields = _safe_fields("Unit", all_fieldnames)
+	
+	units = frappe.get_all(
+		"Unit",
+		filters=filters if filters else None,
+		fields=["*"],
+		order_by=order_by,
+		limit_start=start,
+		limit_page_length=limit
+	)
+	
+	data = []
+	
+	# Prepare list of unit names for batch fetching
+	unit_names = [u.name for u in units]
+	
+	# Fetch Assignments
+	assignments = {}
+	if unit_names:
+		todos = frappe.db.sql("""
+			SELECT reference_name, owner 
+			FROM `tabToDo` 
+			WHERE reference_type = 'Unit'
+			AND reference_name IN %(names)s
+			AND status != 'Cancelled'
+		""", {"names": unit_names}, as_dict=True)
+		
+		for t in todos:
+			if t.reference_name not in assignments:
+				assignments[t.reference_name] = []
+			if t.owner not in assignments[t.reference_name]:
+				assignments[t.reference_name].append(t.owner)
+
+	for u in units:
+		unit_dict = get_compact_unit(u, return_all_fields=True)
+		
+		# Add assignees
+		unit_dict['_assign'] = assignments.get(u.name, [])
+		
+		data.append(unit_dict)
+	
+	total_pages = (total + limit - 1) // limit if total > 0 else 0
+	has_next = (start + len(data)) < total
+	has_previous = page > 1
+	
+	return {
+		"message": {
+			"data": data,
+			"page": page,
+			"page_size": limit,
+			"total": total,
+			"total_pages": total_pages,
+			"has_next": has_next,
+			"has_previous": has_previous
+		}
+	}
+
+
+@frappe.whitelist()
+def get_unit_by_id(unit_id=None, name=None):
+	"""
+	Get a single Unit by ID.
+	"""
+	uid = unit_id or name
+	if not uid:
+		frappe.throw(_("Unit ID is required"))
+		
+	if not frappe.db.exists("Unit", uid):
+		frappe.throw(_("Unit not found"))
+		
+	doc = frappe.get_doc("Unit", uid)
+	unit_dict = doc.as_dict()
+			
+	return {
+		"message": unit_dict
+	}
+
+
+@frappe.whitelist()
+def create_unit(**kwargs):
+	"""
+	Create a new Unit.
+	Supports base64 encoded images for cover_image field.
+	"""
+	try:
+		_clean_kwargs("Unit", kwargs)
+		doc = frappe.new_doc("Unit")
+		doc.update(kwargs)
+		doc.insert()
+		
+		# Handle form file uploads
+		handle_form_uploads(doc)
+		
+		return doc.as_dict()
+	except Exception as e:
+		frappe.log_error(f"Error creating unit: {str(e)}", "Create Unit Error")
+		frappe.throw(_("Failed to create unit: {0}").format(str(e)))
+
+
+
+@frappe.whitelist()
+def update_unit(unit_id, **kwargs):
+	"""
+	Update an existing Unit.
+	"""
+	if not unit_id:
+		frappe.throw(_("Unit ID is required"))
+	
+	try:
+		doc = frappe.get_doc("Unit", unit_id)
+		_clean_kwargs("Unit", kwargs)
+		doc.update(kwargs)
+		doc.save()
+		
+		# Handle form file uploads
+		handle_form_uploads(doc)
+
+		return doc.as_dict()
+	except Exception as e:
+		frappe.log_error(f"Error updating unit: {str(e)}", "Update Unit Error")
+		frappe.throw(_("Failed to update unit: {0}").format(str(e)))
+
+
+@frappe.whitelist()
+def delete_unit(unit_id):
+	"""
+	Delete a Unit.
+	"""
+	if not unit_id:
+		frappe.throw(_("Unit ID is required"))
+		
+	try:
+		frappe.delete_doc("Unit", unit_id)
+		return {"status": "success", "message": _("Unit deleted successfully")}
+	except Exception as e:
+		frappe.log_error(f"Error deleting unit: {str(e)}", "Delete Unit Error")
+		frappe.throw(_("Failed to delete unit: {0}").format(str(e)))
+
+
+# =============================================================================
+# Mobile Dashboard APIs
+# =============================================================================
+
+@frappe.whitelist()
+def get_mobile_dashboard_summary(from_date=None, to_date=None, user=None, project=None):
+	"""
+	Get dashboard summary for mobile app.
+	Can be filtered by date range, user and project.
+	Enforces Role-Based Access Control (RBAC).
+	"""
+	# RBAC Logic
+	current_user = frappe.session.user
+	accessible_users = _get_accessible_users(current_user)
+	
+	if accessible_users is None:
+		# System Manager - can view all, or filter by specific user if provided
+		final_user_filter = user
+	else:
+		# Sales Manager/User - restricted to accessible users
+		if user:
+			if user in accessible_users:
+				final_user_filter = user
+			else:
+				# User requested data they don't have access to -> return empty or filter by self?
+				# Let's filter by self/accessible intersection effectively being empty if no match
+				# But for now, let's default to their accessible scope if invalid user requested?
+				# Or better, just enforce accessible scope query.
+				# If I request user='Other', and I can't see 'Other', I should see nothing.
+				return {} # Access Denied-ish
+		else:
+			# No specific user requested, show data for all accessible users
+			# We need to pass the list of accessible users to the sub-functions?
+			# The sub-functions currently take a single 'user' string.
+			# I need to update sub-functions to accept a LIST of users or handle RBAC.
+			pass
+
+	# Refactoring: 
+	# The sub-functions (_get_leads_by_status_summary, etc) use `user` param in SQL as `owner = %(user)s`.
+	# I need to update them to support `owner IN %(users)s`.
+	
+	return _get_mobile_dashboard_summary_internal(from_date, to_date, user, project, accessible_users)
+
+
+
+
+def _get_accessible_users(user):
+	"""
+	Get list of users that the current user has access to.
+	- System Manager: Returns None (all access)
+	- Sales Manager (Team Leader): Returns [self, team_members...]
+	- Sales User: Returns [self]
+	"""
+	if user == "Administrator":
+		return None
+
+	roles = frappe.get_roles(user)
+	if "System Manager" in roles:
+		return None
+		
+	# Check if user is a Team Leader
+	team = frappe.db.get_value("Team", {"team_leader": user}, "name")
+	if team:
+		members = frappe.db.sql(
+			"SELECT member FROM `tabMember` WHERE parent = %s", 
+			team, 
+			as_dict=True
+		)
+		accessible = [user] + [m.get("member") for m in members]
+		return list(set(accessible))
+		
+	# Default: only self
+	return [user]
+
+
+def _get_mobile_dashboard_summary_internal(from_date=None, to_date=None, user=None, project=None, accessible_users=None):
+	"""
+	Get mobile dashboard summary data.
+	
+	Returns:
+		- customer_status: Lead counts by status
+		- communication_activity: Counts of communication tasks (calls, WhatsApp, SMS)
+		- avg_conversion_time: Average days to convert leads
+		- performance_indicators: Rates for key status transitions
+	
+	Args:
+		from_date: Start date for filtering (default: today)
+		to_date: End date for filtering (default: today)
+		user: Filter by lead owner
+		project: Filter by project
+	"""
+	# If no dates provided, set to None to indicate no date filtering
+	# If only one date provided, default the other to same date
+	if from_date and not to_date:
+		to_date = from_date
+	elif to_date and not from_date:
+		from_date = to_date
+	# If neither provided, from_date and to_date remain None (no date filter)
+	
+	# 1. Customer Status - Lead counts by status
+	customer_status = _get_leads_by_status_summary(from_date, to_date, user, project, accessible_users)
+	
+	# 2. Communication Activity - Task counts by type
+	communication_activity = _get_communication_activity(from_date, to_date, user, accessible_users)
+	
+	# 3. Average Conversion Time
+	avg_conversion_time = _get_avg_conversion_time(from_date, to_date, user, project, accessible_users)
+	
+	# 4. Performance Indicators
+	performance_indicators = _get_performance_indicators(from_date, to_date, user, project, accessible_users)
+	
+	return {
+		"customer_status": customer_status,
+		"communication_activity": communication_activity,
+		"avg_conversion_time": avg_conversion_time,
+		"performance_indicators": performance_indicators,
+		"from_date": str(from_date),
+		"to_date": str(to_date)
+	}
+
+
+
+
+def _get_leads_by_status_summary(from_date, to_date, user=None, project=None, accessible_users=None):
+	"""
+	Get lead counts by status.
+	"""
+	conds = []
+	params = {}
+	
+	# Date filter (optional)
+	if from_date and to_date:
+		conds.append("l.creation >= %(from_date)s AND l.creation < DATE_ADD(%(to_date)s, INTERVAL 1 DAY)")
+		params["from_date"] = from_date
+		params["to_date"] = to_date
+	
+	if user:
+		conds.append("l.lead_owner = %(user)s")
+		params["user"] = user
+	elif accessible_users:
+		conds.append("l.lead_owner IN %(accessible_users)s")
+		params["accessible_users"] = accessible_users
+	
+	if project:
+		conds.append("l.project = %(project)s")
+		params["project"] = project
+	
+	conds.append("COALESCE(l.is_duplicate, 0) = 0")
+	
+	where_clause = "WHERE " + " AND ".join(conds) if conds else ""
+	
+	# Get all statuses with their counts
+	result = frappe.db.sql(
+		f"""
+		SELECT
+			COALESCE(l.status, 'Unknown') AS status,
+			COUNT(*) AS count,
+			COALESCE(s.color, '#808080') AS color
+		FROM `tabCRM Lead` l
+		LEFT JOIN `tabCRM Lead Status` s ON l.status = s.lead_status
+		{where_clause}
+		GROUP BY l.status, s.color, s.position
+		ORDER BY s.position ASC
+		""",
+		params,
+		as_dict=True,
+	)
+	
+	# Get total count
+	total = sum(item.get("count", 0) for item in result)
+	
+	return {
+		"total": total,
+		"statuses": result
+	}
+
+
+def _get_communication_activity(from_date, to_date, user=None, accessible_users=None):
+	"""
+	Get communication activity counts from CRM Tasks.
+	Task types: call, whatsapp message, propert showing, team meeting, lead meeting, other
+	"""
+	conds = []
+	params = {}
+	
+	# Date filter (optional)
+	if from_date and to_date:
+		conds.append("creation >= %(from_date)s AND creation < DATE_ADD(%(to_date)s, INTERVAL 1 DAY)")
+		params["from_date"] = from_date
+		params["to_date"] = to_date
+	
+	if user:
+		conds.append("(assigned_to = %(user)s OR owner = %(user)s)")
+		params["user"] = user
+	elif accessible_users:
+		conds.append("(assigned_to IN %(accessible_users)s OR owner IN %(accessible_users)s)")
+		params["accessible_users"] = accessible_users
+	
+	where_clause = "WHERE " + " AND ".join(conds) if conds else ""
+	
+	# Get counts by task type
+	result = frappe.db.sql(
+		f"""
+		SELECT
+			LOWER(COALESCE(task_type, 'other')) AS task_type,
+			COUNT(*) AS count
+		FROM `tabCRM Task`
+		{where_clause}
+		GROUP BY task_type
+		""",
+		params,
+		as_dict=True,
+	)
+	
+	# Map to standard communication types
+	activity = {
+		"calls": 0,
+		"whatsapp": 0,
+		"sms": 0,  # SMS tracked as short messages
+		"meetings": 0,
+		"showings": 0,
+		"comments": 0, # Added comments
+		"other": 0,
+		"total": 0
+	}
+	
+	for item in result:
+		task_type = item.get("task_type", "other")
+		count = item.get("count", 0)
+		activity["total"] += count
+		
+		if task_type == "call":
+			activity["calls"] = count
+		elif task_type == "whatsapp message":
+			activity["whatsapp"] = count
+		elif task_type in ("team meeting", "lead meeting"):
+			activity["meetings"] += count
+		elif task_type == "property showing":
+			activity["showings"] = count
+		else:
+			activity["other"] += count
+			
+	# Get comments count
+	comment_conds = ["comment_type = 'Comment'"]
+	comment_params = {}
+	
+	if from_date and to_date:
+		comment_conds.append("creation >= %(from_date)s AND creation < DATE_ADD(%(to_date)s, INTERVAL 1 DAY)")
+		comment_params["from_date"] = from_date
+		comment_params["to_date"] = to_date
+	
+	if user:
+		comment_conds.append("owner = %(user)s")
+		comment_params["user"] = user
+	elif accessible_users:
+		comment_conds.append("owner IN %(accessible_users)s")
+		comment_params["accessible_users"] = accessible_users
+		
+	comment_where = "WHERE " + " AND ".join(comment_conds)
+	
+	comments_count = frappe.db.sql(
+		f"""
+		SELECT COUNT(*) 
+		FROM `tabComment`
+		{comment_where}
+		""",
+		comment_params
+	)[0][0]
+	
+	activity["comments"] = comments_count
+	activity["total"] += comments_count
+	
+	return activity
+
+
+def _get_avg_conversion_time(from_date=None, to_date=None, user=None, project=None, accessible_users=None):
+	"""
+	Get average conversion time (Lead Assigned Date -> Deal Creation Date).
+	Compare current period vs previous period.
+	"""
+	conds = []
+	params = {}
+	
+	if user:
+		conds.append("l.lead_owner = %(user)s")
+		params["user"] = user
+	elif accessible_users:
+		conds.append("l.lead_owner IN %(accessible_users)s")
+		params["accessible_users"] = accessible_users
+	
+	if project:
+		conds.append("l.project = %(project)s")
+		params["project"] = project
+	
+	where_base = " AND ".join(conds) if conds else "1=1"
+	
+	# Get conversion time: Deal Creation Date - Lead Assigned Date
+	# Join with CRM Deal to get the deal creation date
+	# Filter where lead is converted (has a deal) and assigned_date is not null
+	
+	sql_query = """
+		SELECT
+			AVG(
+				CASE 
+					WHEN l.creation >= %(from_date)s AND l.creation < DATE_ADD(%(to_date)s, INTERVAL 1 DAY)
+					THEN DATEDIFF(d.creation, l.assigned_date)
+					ELSE NULL
+				END
+			) AS current_avg,
+			AVG(
+				CASE 
+					WHEN l.creation >= %(prev_from_date)s AND l.creation < %(from_date)s
+					THEN DATEDIFF(d.creation, l.assigned_date)
+					ELSE NULL
+				END
+			) AS previous_avg,
+			MIN(
+				CASE 
+					WHEN l.creation >= %(from_date)s AND l.creation < DATE_ADD(%(to_date)s, INTERVAL 1 DAY)
+						AND DATEDIFF(d.creation, l.assigned_date) >= 0
+					THEN DATEDIFF(d.creation, l.assigned_date)
+					ELSE NULL
+				END
+			) AS best_time
+		FROM `tabCRM Lead` l
+		INNER JOIN `tabCRM Deal` d ON d.lead = l.name
+		WHERE l.assigned_date IS NOT NULL AND {where_base}
+	"""
+	
+	if from_date and to_date:
+		# Calculate previous period range
+		diff = frappe.utils.date_diff(to_date, from_date) or 1
+		prev_from_date = frappe.utils.add_days(from_date, -diff)
+		params["from_date"] = from_date
+		params["to_date"] = to_date
+		params["prev_from_date"] = prev_from_date
+		
+		result = frappe.db.sql(sql_query.format(where_base=where_base), params, as_dict=True)
+	else:
+		# No date filter - get all converted leads
+		sql_query_no_date = """
+			SELECT
+				AVG(DATEDIFF(d.creation, l.assigned_date)) AS current_avg,
+				0 AS previous_avg,
+				MIN(
+					CASE WHEN DATEDIFF(d.creation, l.assigned_date) >= 0 
+					THEN DATEDIFF(d.creation, l.assigned_date) 
+					ELSE NULL END
+				) AS best_time
+			FROM `tabCRM Lead` l
+			INNER JOIN `tabCRM Deal` d ON d.lead = l.name
+			WHERE l.assigned_date IS NOT NULL AND {where_base}
+		"""
+		result = frappe.db.sql(sql_query_no_date.format(where_base=where_base), params, as_dict=True)
+	
+	current_avg = result[0].current_avg or 0
+	previous_avg = result[0].previous_avg or 0
+	best_time = result[0].best_time or 0
+	
+	# Calculate difference (negative means faster)
+	diff_days = round(float(current_avg) - float(previous_avg), 1)
+	
+	return {
+		"average_days": round(float(current_avg), 1),
+		"previous_average_days": round(float(previous_avg), 1),
+		"difference_days": diff_days,
+		"best_time_days": round(float(best_time), 1),
+		"is_faster": diff_days < 0
+	}
+
+
+def _get_performance_indicators(from_date, to_date, user=None, project=None, accessible_users=None):
+	"""
+	Get performance indicators (conversion rates between statuses).
+	- Preview Rate: Leads reaching "Showing" status
+	- Reservation Rate: Leads with "Reservation" document
+	- Conversion Rate: Leads fully converted
+	"""
+	conds = []
+	params = {}
+	
+	# Date filter (optional)
+	if from_date and to_date:
+		conds.append("creation >= %(from_date)s AND creation < DATE_ADD(%(to_date)s, INTERVAL 1 DAY)")
+		params["from_date"] = from_date
+		params["to_date"] = to_date
+	
+	if user:
+		conds.append("lead_owner = %(user)s")
+		params["user"] = user
+	elif accessible_users:
+		conds.append("lead_owner IN %(accessible_users)s")
+		params["accessible_users"] = accessible_users
+	
+	if project:
+		conds.append("project = %(project)s")
+		params["project"] = project
+		conds.append("COALESCE(is_duplicate, 0) = 0")
+	
+	where_clause = "WHERE " + " AND ".join(conds) if conds else ""
+	
+	# Get status distribution
+	# Preview: Status is 'Showing'
+	# Reservation: Has a linked Reservation document
+	# Conversion: converted = 1
+	
+	result = frappe.db.sql(
+		f"""
+		SELECT
+			COUNT(*) AS total,
+			SUM(CASE WHEN status = 'Showing' THEN 1 ELSE 0 END) AS preview_count,
+			SUM(CASE WHEN (SELECT COUNT(*) FROM `tabReservation` WHERE lead=`tabCRM Lead`.name) > 0 THEN 1 ELSE 0 END) AS reservation_count,
+			SUM(CASE WHEN converted = 1 THEN 1 ELSE 0 END) AS conversion_count
+		FROM `tabCRM Lead`
+		{where_clause}
+		""",
+		params,
+		as_dict=True,
+	)
+	
+	total = result[0].total or 1  # Avoid division by zero
+	preview_count = result[0].preview_count or 0
+	reservation_count = result[0].reservation_count or 0
+	conversion_count = result[0].conversion_count or 0
+	
+	return {
+		"preview_rate": round((preview_count / total) * 100, 1),
+		"reservation_rate": round((reservation_count / total) * 100, 1),
+		"conversion_rate": round((conversion_count / total) * 100, 1),
+		"total_leads": total,
+		"preview_count": preview_count,
+		"reservation_count": reservation_count,
+		"conversion_count": conversion_count
+	}
+
+
+@frappe.whitelist()
+def get_mobile_leads_list(
+	from_date=None, to_date=None, user=None, project=None,
+	search=None, status=None, page=1, page_size=20
+):
+	"""
+	Get paginated leads list with communication stats for mobile dashboard.
+	
+	Args:
+		from_date: Start date filter (default: today)
+		to_date: End date filter (default: today)
+		user: Filter by lead owner
+		project: Filter by project
+		search: Search term for lead name or phone
+		status: Filter by lead status
+		page: Page number (1-indexed)
+		page_size: Number of items per page
+	
+	Returns:
+		Paginated list of leads with communication stats
+	"""
+	# If no dates provided, set to None to indicate no date filtering
+	# If only one date provided, default the other to same date
+	if from_date and not to_date:
+		to_date = from_date
+	elif to_date and not from_date:
+		from_date = to_date
+	# If neither provided, from_date and to_date remain None (no date filter)
+	
+	# RBAC Logic
+	current_user = frappe.session.user
+	accessible_users = _get_accessible_users(current_user)
+	
+	if accessible_users is not None and user:
+		if user not in accessible_users:
+			# Access Denied - return empty
+			return {
+				"leads": [],
+				"pagination": {
+					"page": 1,
+					"page_size": 20,
+					"total_count": 0,
+					"total_pages": 0,
+					"has_next": False,
+					"has_previous": False
+				}
+			}
+
+	page = cint(page) or 1
+	page_size = cint(page_size) or 20
+	offset = (page - 1) * page_size
+	
+	conds = []
+	params = {
+		"limit": page_size,
+		"offset": offset
+	}
+	
+	# Date filter (optional)
+	if from_date and to_date:
+		conds.append("l.creation >= %(from_date)s AND l.creation < DATE_ADD(%(to_date)s, INTERVAL 1 DAY)")
+		params["from_date"] = from_date
+		params["to_date"] = to_date
+	
+	if user:
+		conds.append("l.lead_owner = %(user)s")
+		params["user"] = user
+	elif accessible_users:
+		conds.append("l.lead_owner IN %(accessible_users)s")
+		params["accessible_users"] = accessible_users
+	
+	if project:
+		conds.append("l.project = %(project)s")
+		params["project"] = project
+		conds.append("COALESCE(l.is_duplicate, 0) = 0")
+	
+	if search:
+		conds.append("(l.lead_name LIKE %(search)s OR l.mobile_no LIKE %(search)s OR l.email LIKE %(search)s)")
+		params["search"] = f"%{search}%"
+	
+	if status:
+		conds.append("l.status = %(status)s")
+		params["status"] = status
+	
+	where_clause = "WHERE " + " AND ".join(conds) if conds else ""
+	
+	# Get leads with communication stats
+	leads = frappe.db.sql(
+		f"""
+		SELECT
+			l.name,
+			l.lead_name,
+			l.mobile_no,
+			l.email,
+			l.status,
+			l.creation,
+			l.modified,
+			l.assigned_date,
+			s.color AS status_color,
+			(SELECT COUNT(*) FROM `tabCRM Task` t 
+			 WHERE t.reference_docname = l.name 
+			 AND t.reference_doctype = 'CRM Lead' 
+			 AND LOWER(t.task_type) = 'call') AS call_count,
+			(SELECT COUNT(*) FROM `tabCRM Task` t 
+			 WHERE t.reference_docname = l.name 
+			 AND t.reference_doctype = 'CRM Lead' 
+			 AND LOWER(t.task_type) = 'whatsapp message') AS whatsapp_count,
+			(SELECT COUNT(*) FROM `tabCRM Task` t 
+			 WHERE t.reference_docname = l.name 
+			 AND t.reference_doctype = 'CRM Lead' 
+			 AND LOWER(t.task_type) IN ('team meeting', 'lead meeting')) AS meeting_count,
+			0 AS sms_count,
+			(SELECT COUNT(*) FROM `tabComment` c 
+			 WHERE c.reference_name = l.name 
+			 AND c.reference_doctype = 'CRM Lead') AS comment_count
+		FROM `tabCRM Lead` l
+		LEFT JOIN `tabCRM Lead Status` s ON l.status = s.lead_status
+		{where_clause}
+		ORDER BY l.creation DESC
+		LIMIT %(limit)s OFFSET %(offset)s
+		""",
+		params,
+		as_dict=True,
+	)
+	
+	# Get total count for pagination
+	count_result = frappe.db.sql(
+		f"""
+		SELECT COUNT(*) AS total
+		FROM `tabCRM Lead` l
+		{where_clause}
+		""",
+		params,
+		as_dict=True,
+	)
+	total_count = count_result[0].total if count_result else 0
+	total_pages = (total_count + page_size - 1) // page_size
+	
+	return {
+		"leads": leads,
+		"pagination": {
+			"page": page,
+			"page_size": page_size,
+			"total_count": total_count,
+			"total_pages": total_pages,
+			"has_next": page < total_pages,
+			"has_previous": page > 1
+		},
+		"from_date": str(from_date) if from_date else None,
+		"to_date": str(to_date) if to_date else None
+	}
+
+
+@frappe.whitelist()
+def export_leads_report(
+	from_date=None, to_date=None, user=None, project=None,
+	status=None, format="xlsx"
+):
+	"""
+	Export leads report to Excel format.
+	
+	Args:
+		from_date: Start date filter
+		to_date: End date filter
+		user: Filter by lead owner
+		project: Filter by project
+		status: Filter by lead status
+		format: Export format (xlsx)
+	
+	Returns:
+		Excel file content as downloadable response
+	"""
+	import io
+	from frappe.utils.xlsxutils import make_xlsx
+	
+	# If no dates provided, get all data
+	if from_date and not to_date:
+		to_date = from_date
+	elif to_date and not from_date:
+		from_date = to_date
+	
+	# RBAC Logic
+	current_user = frappe.session.user
+	accessible_users = _get_accessible_users(current_user)
+	
+	if accessible_users is not None and user:
+		if user not in accessible_users:
+			return # Access Denied -> Empty response or error? Return empty excelfile?
+			# For now let's just let it return empty data by adding a false condition or handled below
+			pass 
+
+	conds = []
+	params = {}
+	
+	# Date filter (optional)
+	if from_date and to_date:
+		conds.append("l.creation >= %(from_date)s AND l.creation < DATE_ADD(%(to_date)s, INTERVAL 1 DAY)")
+		params["from_date"] = from_date
+		params["to_date"] = to_date
+	
+	if user:
+		conds.append("l.lead_owner = %(user)s")
+		params["user"] = user
+	elif accessible_users:
+		conds.append("l.lead_owner IN %(accessible_users)s")
+		params["accessible_users"] = accessible_users
+	
+	if project:
+		conds.append("l.project = %(project)s")
+		params["project"] = project
+		conds.append("COALESCE(l.is_duplicate, 0) = 0")
+	
+	if status:
+		conds.append("l.status = %(status)s")
+		params["status"] = status
+	
+	where_clause = "WHERE " + " AND ".join(conds) if conds else ""
+	
+	# Get all leads with full details
+	leads = frappe.db.sql(
+		f"""
+		SELECT
+			l.name AS lead_id,
+			l.lead_name,
+			l.mobile_no,
+			l.email,
+			l.status,
+			l.source,
+			l.creation AS created_date,
+			l.assigned_date,
+			l.modified AS last_modified,
+			(SELECT DATEDIFF(MIN(creation), l.assigned_date) FROM `tabCRM Deal` WHERE lead = l.name) AS days_to_convert,
+			l.lead_owner,
+			l.project,
+			s.color AS status_color,
+			(SELECT COUNT(*) FROM `tabCRM Task` t 
+			 WHERE t.reference_docname = l.name 
+			 AND t.reference_doctype = 'CRM Lead' 
+			 AND LOWER(t.task_type) = 'call') AS call_count,
+			(SELECT COUNT(*) FROM `tabCRM Task` t 
+			 WHERE t.reference_docname = l.name 
+			 AND t.reference_doctype = 'CRM Lead' 
+			 AND LOWER(t.task_type) = 'whatsapp message') AS whatsapp_count,
+			(SELECT COUNT(*) FROM `tabCRM Task` t 
+			 WHERE t.reference_docname = l.name 
+			 AND t.reference_doctype = 'CRM Lead' 
+			 AND LOWER(t.task_type) IN ('team meeting', 'lead meeting')) AS meeting_count,
+			(SELECT COUNT(*) FROM `tabCRM Task` t 
+			 WHERE t.reference_docname = l.name 
+			 AND t.reference_doctype = 'CRM Lead' 
+			 AND LOWER(t.task_type) = 'property showing') AS showing_count,
+			0 AS sms_count,
+			(SELECT COUNT(*) FROM `tabComment` c 
+			 WHERE c.reference_name = l.name 
+			 AND c.reference_doctype = 'CRM Lead') AS feedback_count
+		FROM `tabCRM Lead` l
+		LEFT JOIN `tabCRM Lead Status` s ON l.status = s.lead_status
+		{where_clause}
+		ORDER BY l.creation DESC
+		""",
+		params,
+		as_dict=True,
+	)
+	
+	# Build data for Excel
+	columns = [
+		"Lead ID", "Lead Name", "Mobile", "Email", "Status", "Source",
+		"Created Date", "Assigned Date", "Last Modified", "Days to Convert",
+		"Lead Owner", "Project", "Calls", "WhatsApp", "SMS", "Meetings", 
+		"Showings", "Feedbacks"
+	]
+	
+	data = [columns]  # Header row
+	
+	for lead in leads:
+		data.append([
+			lead.get("lead_id", ""),
+			lead.get("lead_name", ""),
+			lead.get("mobile_no", ""),
+			lead.get("email", ""),
+			lead.get("status", ""),
+			lead.get("source", ""),
+			str(lead.get("created_date", "")),
+			str(lead.get("assigned_date", "") or ""),
+			str(lead.get("last_modified", "")),
+			lead.get("days_to_convert", 0),
+			lead.get("lead_owner", ""),
+			lead.get("project", ""),
+			lead.get("call_count", 0),
+			lead.get("whatsapp_count", 0),
+			lead.get("sms_count", 0),
+			lead.get("meeting_count", 0),
+			lead.get("showing_count", 0),
+			lead.get("feedback_count", 0)
+		])
+	
+	# Create Excel file
+	xlsx_file = make_xlsx(data, "Leads Report")
+	
+	# Return as file download
+	frappe.response["filename"] = f"leads_report_{today()}.xlsx"
+	frappe.response["filecontent"] = xlsx_file.getvalue()
+	frappe.response["type"] = "download"
+
+
+@frappe.whitelist()
+def export_dashboard_summary(from_date=None, to_date=None, user=None, project=None):
+	"""
+	Export dashboard summary to Excel format.
+	
+	Returns summary statistics as Excel.
+	"""
+	import io
+	from frappe.utils.xlsxutils import make_xlsx
+	
+	# Get dashboard data
+	summary = get_mobile_dashboard_summary(from_date, to_date, user, project)
+	
+	data = []
+	
+	# Section 1: Customer Status
+	data.append(["=== Customer Status ===", "", ""])
+	data.append(["Status", "Count", "Color"])
+	for status in summary.get("customer_status", {}).get("statuses", []):
+		data.append([status.get("status"), status.get("count"), status.get("color")])
+	data.append(["Total", summary.get("customer_status", {}).get("total", 0), ""])
+	data.append(["", "", ""])
+	
+	# Section 2: Communication Activity
+	data.append(["=== Communication Activity ===", "", ""])
+	activity = summary.get("communication_activity", {})
+	data.append(["Type", "Count", ""])
+	data.append(["Calls", activity.get("calls", 0), ""])
+	data.append(["WhatsApp", activity.get("whatsapp", 0), ""])
+	data.append(["Meetings", activity.get("meetings", 0), ""])
+	data.append(["Showings", activity.get("showings", 0), ""])
+	data.append(["Comments", activity.get("comments", 0), ""]) # Added Comments
+	data.append(["Other", activity.get("other", 0), ""])
+	data.append(["Total", activity.get("total", 0), ""])
+	data.append(["", "", ""])
+	
+	# Section 3: Conversion Time
+	data.append(["=== Average Conversion Time ===", "", ""])
+	conv = summary.get("avg_conversion_time", {})
+	data.append(["Metric", "Value", ""])
+	data.append(["Average Days", conv.get("average_days", 0), ""])
+	data.append(["Previous Period Average", conv.get("previous_average_days", 0), ""])
+	data.append(["Difference", conv.get("difference_days", 0), ""])
+	data.append(["Best Time (Days)", conv.get("best_time_days", 0), ""])
+	data.append(["", "", ""])
+	
+	# Section 4: Performance Indicators
+	data.append(["=== Performance Indicators ===", "", ""])
+	perf = summary.get("performance_indicators", {})
+	data.append(["Metric", "Rate (%)", "Count"])
+	data.append(["Preview Rate", perf.get("preview_rate", 0), perf.get("preview_count", 0)])
+	data.append(["Reservation Rate", perf.get("reservation_rate", 0), perf.get("reservation_count", 0)])
+	data.append(["Conversion Rate", perf.get("conversion_rate", 0), perf.get("conversion_count", 0)])
+	data.append(["Total Leads", "", perf.get("total_leads", 0)])
+	
+	# Create Excel file
+	xlsx_file = make_xlsx(data, "Dashboard Summary")
+	
+	# Return as file download
+	frappe.response["filename"] = f"dashboard_summary_{today()}.xlsx"
+	frappe.response["filecontent"] = xlsx_file.getvalue()
+	frappe.response["type"] = "download"
