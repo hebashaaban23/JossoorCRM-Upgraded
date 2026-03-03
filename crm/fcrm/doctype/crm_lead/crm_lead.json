@@ -388,8 +388,7 @@
    "fieldname": "property_region",
    "fieldtype": "Select",
    "label": "Region / District",
-   "options": "\nMaadi\nDegla\nSarayat\nZohour\nNew Maadi\nHeliopolis\nNasr City\nMadinet Nasr\nZamalek\nGarden City\nDowntown Cairo\nMohandessin\nAgouza\nDokki\nShoubra\nShubra El Kheima\nNew Cairo - 1st Settlement\nNew Cairo - 5th Settlement\nNew Cairo - 3rd Settlement\nBeit El Watan\nAl Rehab City\nMadinaty\nMostakbal City\nAl Shorouk City\nAl Obour City\nNew Administrative Capital - R1\nNew Administrative Capital - R2\nNew Administrative Capital - R3\n6th of October - Hay 1\n6th of October - Hay 2\n6th of October - Hay 3\nSheikh Zayed - Hay 1\nSheikh Zayed - Hay 2\nNorth Coast\nAin Sokhna\nEl Gouna\nHurghada\nSharm El Sheikh",
-   "description": "Neighborhood / district within the selected city"
+   "options": "\nMaadi\nDegla\nSarayat\nZohour\nNew Maadi\nHeliopolis\nNasr City\nMadinet Nasr\nZamalek\nGarden City\nDowntown Cairo\nMohandessin\nAgouza\nDokki\nShoubra\nShubra El Kheima\nNew Cairo - 1st Settlement\nNew Cairo - 5th Settlement\nNew Cairo - 3rd Settlement\nBeit El Watan\nAl Rehab City\nMadinaty\nMostakbal City\nAl Shorouk City\nAl Obour City\nNew Administrative Capital - R1\nNew Administrative Capital - R2\nNew Administrative Capital - R3\n6th of October - Hay 1\n6th of October - Hay 2\n6th of October - Hay 3\nSheikh Zayed - Hay 1\nSheikh Zayed - Hay 2\nNorth Coast\nAin Sokhna\nEl Gouna\nHurghada\nSharm El Sheikh"
   },
   {
    "fieldname": "column_break_prop1",
@@ -405,8 +404,7 @@
    "fieldname": "property_subtype",
    "fieldtype": "Select",
    "label": "Property Subtype",
-   "options": "\nApartment\nDuplex\nPenthouse\nStudio\nVilla\nTwin House\nTownhouse\nChalet\nCabin\nShop\nShowroom\nWarehouse\nOffice\nAdministrative Office\nClinic\nPlot - Residential\nPlot - Commercial\nPlot - Industrial",
-   "description": "Unit type — filtered by Property Type in UI"
+   "options": "\nApartment\nDuplex\nPenthouse\nStudio\nVilla\nTwin House\nTownhouse\nChalet\nCabin\nShop\nShowroom\nWarehouse\nOffice\nAdministrative Office\nClinic\nPlot - Residential\nPlot - Commercial\nPlot - Industrial"
   },
   {
    "fieldname": "column_break_prop2",
@@ -415,8 +413,7 @@
   {
    "fieldname": "property_space",
    "fieldtype": "Int",
-   "label": "Property Space (sqm)",
-   "description": "Required area in square meters"
+   "label": "Property Space (sqm)"
   },
   {
    "fieldname": "property_floor",
@@ -464,14 +461,12 @@
   {
    "fieldname": "property_year_built",
    "fieldtype": "Int",
-   "label": "Year Built",
-   "description": "Year the property was or will be built"
+   "label": "Year Built"
   },
   {
    "fieldname": "property_delivery_date",
    "fieldtype": "Date",
-   "label": "Expected Delivery Date",
-   "description": "For off-plan / under construction units"
+   "label": "Expected Delivery Date"
   },
   {
    "fieldname": "property_room_details_section",
@@ -482,15 +477,13 @@
    "fieldname": "property_bedrooms",
    "fieldtype": "Select",
    "label": "Bedrooms",
-   "options": "\nStudio\n1\n2\n3\n4\n5\n6+",
-   "description": "Number of bedrooms required"
+   "options": "\nStudio\n1\n2\n3\n4\n5\n6+"
   },
   {
    "fieldname": "property_bathrooms",
    "fieldtype": "Select",
    "label": "Bathrooms",
-   "options": "\n1\n2\n3\n4\n5+",
-   "description": "Number of bathrooms required"
+   "options": "\n1\n2\n3\n4\n5+"
   },
   {
    "fieldname": "column_break_prop5",
@@ -512,8 +505,7 @@
    "fieldname": "property_features",
    "fieldtype": "Select",
    "label": "Key Feature",
-   "options": "\nPrivate Garden\nPrivate Pool\nShared Pool\nGym\nGarage\nElevator\nSecurity / Gated\nSmart Home\nSea Access\nLake / Lagoon\nGolf Course View\nPet Friendly\nStorage Room\nMaid Room\nDriver Room",
-   "description": "Most important feature the client requires"
+   "options": "\nPrivate Garden\nPrivate Pool\nShared Pool\nGym\nGarage\nElevator\nSecurity / Gated\nSmart Home\nSea Access\nLake / Lagoon\nGolf Course View\nPet Friendly\nStorage Room\nMaid Room\nDriver Room"
   },
   {
    "fieldname": "financial_preferences_section",
@@ -523,14 +515,12 @@
   {
    "fieldname": "property_min_price",
    "fieldtype": "Currency",
-   "label": "Min Budget",
-   "description": "Minimum price the client is willing to pay"
+   "label": "Min Budget"
   },
   {
    "fieldname": "property_max_price",
    "fieldtype": "Currency",
-   "label": "Max Budget",
-   "description": "Maximum price the client can pay"
+   "label": "Max Budget"
   },
   {
    "fieldname": "column_break_prop6",
@@ -545,8 +535,7 @@
   {
    "fieldname": "property_down_payment",
    "fieldtype": "Percent",
-   "label": "Down Payment (%)",
-   "description": "Preferred down payment — relevant for Installment / Mortgage / Bank Loan"
+   "label": "Down Payment (%)"
   },
   {
    "fieldname": "column_break_prop7",

@@ -1,753 +1,691 @@
 <template>
   <div
-    class="relative flex h-full flex-col justify-between transition-all duration-300 ease-in-out"
-    :class="isSidebarCollapsed ? 'w-12' : 'w-[220px]'"
+    class="sidebar-root relative flex h-full flex-col"
+    :class="isSidebarCollapsed ? 'sidebar-collapsed' : 'sidebar-expanded'"
   >
-    <div>
+
+    <!-- ── Logo / User ── -->
+    <div class="sidebar-top">
       <UserDropdown class="p-2" :isCollapsed="isSidebarCollapsed" />
     </div>
 
-    <div class="flex-1 overflow-y-auto">
-      <div class="mb-3 flex flex-col">
-        <SidebarLink
-          id="notifications-btn"
-          :label="__('Notifications')"
-          :icon="NotificationsIcon"
-          :isCollapsed="isSidebarCollapsed"
-          @click="() => toggleNotificationPanel()"
-          class="relative mx-2 my-0.5"
+    <!-- ── Navigation ── -->
+    <div class="sidebar-body scrollbar-hide">
+
+      <!-- Notifications -->
+      <div class="nav-section-gap">
+        <button
+          class="nav-item"
+          :class="{ 'nav-item--collapsed': isSidebarCollapsed }"
+          @click="toggleNotificationPanel()"
+          :title="isSidebarCollapsed ? __('Notifications') : ''"
         >
-          <template #right>
-            <Badge
-              v-if="!isSidebarCollapsed && unreadNotificationsCount"
-              :label="unreadNotificationsCount"
-              variant="subtle"
-            />
-            <div
-              v-else-if="unreadNotificationsCount"
-              class="absolute -left-1.5 top-1 z-20 h-[5px] w-[5px] translate-x-6 translate-y-1 rounded-full bg-surface-gray-6 ring-1 ring-white"
-            />
-          </template>
-        </SidebarLink>
+          <span class="nav-icon">
+            <NotificationsIcon class="icon" />
+          </span>
+          <span v-if="!isSidebarCollapsed" class="nav-label">{{ __('Notifications') }}</span>
+          <span v-if="!isSidebarCollapsed && unreadNotificationsCount" class="nav-badge">
+            {{ unreadNotificationsCount }}
+          </span>
+          <span v-if="isSidebarCollapsed && unreadNotificationsCount" class="nav-badge-dot" />
+        </button>
       </div>
 
-      <div v-for="view in allViews" :key="view.name">
-        <div
-          v-if="!view.hideLabel && isSidebarCollapsed && view.views?.length"
-          class="mx-2 my-2 h-1 border-b"
-        />
+      <div class="nav-divider" />
 
-        <Section :label="view.name" :hideLabel="view.hideLabel" :opened="view.opened">
-          <template #header="{ opened, hide, toggle }">
+      <!-- Main nav links -->
+      <div class="nav-section-gap">
+        <template v-for="(link, idx) in mainLinks" :key="link.label + idx">
+
+          <!-- Link with sublinks (Leads, Inventory…) -->
+          <div v-if="link.views" class="nav-group">
             <div
-              v-if="!hide"
-              class="flex cursor-pointer gap-1.5 px-1 text-base font-medium text-ink-gray-5 transition-all duration-300 ease-in-out"
-              :class="isSidebarCollapsed ? 'ml-0 h-0 overflow-hidden opacity-0' : 'ml-2 mt-4 h-7 w-auto opacity-100'"
-              @click="toggle()"
+              class="nav-group-header"
+              :class="{ 'nav-group-header--collapsed': isSidebarCollapsed }"
             >
-              <FeatherIcon name="chevron-right" class="h-4 text-ink-gray-9 transition-all duration-300 ease-in-out" :class="{ 'rotate-90': opened }" />
-              <span>{{ __(view.name) }}</span>
+              <!-- Main clickable link -->
+              <router-link :to="link.to" custom v-slot="{ navigate, isActive }">
+                <button
+                  class="nav-item nav-item--main"
+                  :class="[
+                    { 'nav-item--active': isActive },
+                    { 'nav-item--collapsed': isSidebarCollapsed },
+                  ]"
+                  :title="isSidebarCollapsed ? __(link.label) : ''"
+                  @click="navigate"
+                >
+                  <span class="nav-icon">
+                    <component :is="link.icon" class="icon" />
+                  </span>
+                  <span v-if="!isSidebarCollapsed" class="nav-label">{{ __(link.label) }}</span>
+                </button>
+              </router-link>
+
+              <!-- Caret — ONLY visible when NOT collapsed -->
+              <button
+                v-if="!isSidebarCollapsed"
+                class="nav-caret"
+                :class="{ 'nav-caret--open': openDropdowns[idx] }"
+                @click.stop="toggleGroup(idx)"
+              >
+                <FeatherIcon name="chevron-right" class="h-3 w-3" />
+              </button>
             </div>
-          </template>
 
-          <!-- Render links, but support a 'views' (sublinks) property on a link (used for Leads) -->
-          <nav class="flex flex-col">
-            <template v-for="(link, idx) in view.views" :key="link.label + idx">
-              <!-- Dropdown-capable main link (used for Leads: has both `to` and `views`) -->
-              <div v-if="link.views" class="w-full">
-                <div class="flex items-center justify-between mx-2 my-0.5">
-                  <!-- Main label (navigates) -->
-                  <SidebarLink
-                    :icon="link.icon"
-                    :label="__(link.label)"
-                    :to="link.to"
-                    :isCollapsed="isSidebarCollapsed"
-                    class="flex-1"
-                  />
-
-                  <!-- caret to toggle sublinks (only visible when not collapsed) -->
-                  <!-- caret to toggle sublinks (only visible when not collapsed) -->
-                  <button
-                    v-if="!isSidebarCollapsed"
-                    class="p-1 mr-2 rounded hover:bg-surface-gray-2"
-                    @click.stop="toggleDropdown(linkKey(link, idx))"
-                    :aria-expanded="String(!!openDropdown[linkKey(link, idx)])"
-                  >
-                    <FeatherIcon name="chevron-right"
-                      class="h-4 text-ink-gray-9 transition-all duration-200"
-                      :class="{ 'rotate-90': openDropdown[linkKey(link, idx)] }"
-                    />
-                  </button>
-                </div>
-
-                <!-- sublinks (indented) -->
-                <div v-show="openDropdown[linkKey(link, idx)]" class="ml-4">
-                  <SidebarLink
-                    v-for="(sublink, sidx) in link.views"
-                    :key="sublink.label + sidx"
-                    :label="__(sublink.label)"
-                    :isCollapsed="isSidebarCollapsed"
-                    class="mx-2 my-0.5"
-                    @click="() => navigateSublink(sublink)"
-                  />
-                </div>
+            <!-- Sublinks — hidden when collapsed -->
+            <transition name="submenu">
+              <div
+                v-if="!isSidebarCollapsed && openDropdowns[idx]"
+                class="sublinks"
+              >
+                <button
+                  v-for="(sub, sidx) in link.views"
+                  :key="sub.label + sidx"
+                  class="sublink"
+                  @click="navigateSublink(sub)"
+                >
+                  <span class="sublink-pip" />
+                  <span class="sublink-label">{{ __(sub.label) }}</span>
+                </button>
               </div>
+            </transition>
+          </div>
 
-              <!-- Normal single link (no sublinks) -->
-              <div v-else>
-                <SidebarLink
-                  :icon="link.icon"
-                  :label="__(link.label)"
-                  :to="link.to"
-                  :isCollapsed="isSidebarCollapsed"
-                  class="mx-2 my-0.5"
-                />
-              </div>
-            </template>
-          </nav>
-        </Section>
+          <!-- Plain link -->
+          <router-link
+            v-else
+            :to="resolveTo(link.to)"
+            custom
+            v-slot="{ navigate, isActive }"
+          >
+            <button
+              class="nav-item"
+              :class="[
+                { 'nav-item--active': isActive },
+                { 'nav-item--collapsed': isSidebarCollapsed },
+              ]"
+              :title="isSidebarCollapsed ? __(link.label) : ''"
+              @click="navigate"
+            >
+              <span class="nav-icon">
+                <component :is="link.icon" class="icon" />
+              </span>
+              <span v-if="!isSidebarCollapsed" class="nav-label">{{ __(link.label) }}</span>
+            </button>
+          </router-link>
+
+        </template>
       </div>
+
+      <!-- Public views -->
+      <template v-if="getPublicViews().length">
+        <div class="nav-divider" />
+        <div v-if="!isSidebarCollapsed" class="nav-section-label">{{ __('Public Views') }}</div>
+        <div class="nav-section-gap">
+          <router-link
+            v-for="view in parsedPublicViews"
+            :key="view.label"
+            :to="view.to"
+            custom
+            v-slot="{ navigate, isActive }"
+          >
+            <button
+              class="nav-item"
+              :class="[{ 'nav-item--active': isActive }, { 'nav-item--collapsed': isSidebarCollapsed }]"
+              :title="isSidebarCollapsed ? view.label : ''"
+              @click="navigate"
+            >
+              <span class="nav-icon"><PinIcon class="icon" /></span>
+              <span v-if="!isSidebarCollapsed" class="nav-label">{{ view.label }}</span>
+            </button>
+          </router-link>
+        </div>
+      </template>
+
+      <!-- Pinned views -->
+      <template v-if="getPinnedViews().length">
+        <div class="nav-divider" />
+        <div v-if="!isSidebarCollapsed" class="nav-section-label">{{ __('Pinned Views') }}</div>
+        <div class="nav-section-gap">
+          <router-link
+            v-for="view in parsedPinnedViews"
+            :key="view.label"
+            :to="view.to"
+            custom
+            v-slot="{ navigate, isActive }"
+          >
+            <button
+              class="nav-item"
+              :class="[{ 'nav-item--active': isActive }, { 'nav-item--collapsed': isSidebarCollapsed }]"
+              :title="isSidebarCollapsed ? view.label : ''"
+              @click="navigate"
+            >
+              <span class="nav-icon"><PinIcon class="icon" /></span>
+              <span v-if="!isSidebarCollapsed" class="nav-label">{{ view.label }}</span>
+            </button>
+          </router-link>
+        </div>
+      </template>
+
     </div>
 
-    <div class="m-2 flex flex-col gap-1">
-      <div class="flex flex-col gap-2 mb-1">
-        <SignupBanner v-if="isDemoSite" :isSidebarCollapsed="isSidebarCollapsed" :afterSignup="() => capture('signup_from_demo_site')" />
-        <TrialBanner v-if="isFCSite" :isSidebarCollapsed="isSidebarCollapsed" :afterUpgrade="() => capture('upgrade_plan_from_trial_banner')" />
-      </div>
+    <!-- ── Footer ── -->
+    <div class="sidebar-footer">
+      <SignupBanner
+        v-if="isDemoSite"
+        :isSidebarCollapsed="isSidebarCollapsed"
+        :afterSignup="() => capture('signup_from_demo_site')"
+      />
+      <TrialBanner
+        v-if="isFCSite"
+        :isSidebarCollapsed="isSidebarCollapsed"
+        :afterUpgrade="() => capture('upgrade_plan_from_trial_banner')"
+      />
 
-      <SidebarLink
-        v-if="isOnboardingStepsCompleted"
-        :label="__('Help')"
-        :isCollapsed="isSidebarCollapsed"
-        @click="() => { showHelpModal = minimize ? true : !showHelpModal; minimize = !showHelpModal }"
-      >
-        <template #icon>
-          <HelpIcon class="h-4 w-4" />
-        </template>
-      </SidebarLink>
-
-      <SidebarLink
-        :label="isSidebarCollapsed ? __('Expand') : __('Collapse')"
-        :isCollapsed="isSidebarCollapsed"
+      <!-- Collapse toggle -->
+      <button
+        class="nav-item nav-item--muted"
+        :class="{ 'nav-item--collapsed': isSidebarCollapsed }"
+        :title="isSidebarCollapsed ? __('Expand sidebar') : ''"
         @click="isSidebarCollapsed = !isSidebarCollapsed"
-        class=""
       >
-        <template #icon>
-          <span class="grid h-4 w-4 flex-shrink-0 place-items-center">
-            <CollapseSidebar class="h-4 w-4 text-ink-gray-7 duration-300 ease-in-out" :class="{ '[transform:rotateY(180deg)]': isSidebarCollapsed }" />
-          </span>
-        </template>
-      </SidebarLink>
+        <span class="nav-icon">
+          <CollapseSidebar
+            class="icon transition-transform duration-300"
+            :class="{ '[transform:rotateY(180deg)]': isSidebarCollapsed }"
+          />
+        </span>
+        <span v-if="!isSidebarCollapsed" class="nav-label">{{ __('Collapse') }}</span>
+      </button>
     </div>
 
     <Notifications />
     <Settings />
 
-    <HelpModal
-      v-if="showHelpModal"
-      v-model="showHelpModal"
-      v-model:articles="articles"
-      :logo="CRMLogo"
-      :afterSkip="(step) => capture('onboarding_step_skipped_' + step)"
-      :afterSkipAll="() => capture('onboarding_steps_skipped')"
-      :afterReset="(step) => capture('onboarding_step_reset_' + step)"
-      :afterResetAll="() => capture('onboarding_steps_reset')"
-      docsLink="https://docs.frappe.io/crm"
-    />
-
-    <IntermediateStepModal v-model="showIntermediateModal" :currentStep="currentStep" />
   </div>
 </template>
 
 <script setup>
-import LucideArchive from '~icons/lucide/archive'
-import LucideLayoutDashboard from '~icons/lucide/layout-dashboard'
-import CRMLogo from '@/components/Icons/CRMLogo.vue'
-import InviteIcon from '@/components/Icons/InviteIcon.vue'
-import ConvertIcon from '@/components/Icons/ConvertIcon.vue'
-import CommentIcon from '@/components/Icons/CommentIcon.vue'
-import EmailIcon from '@/components/Icons/EmailIcon.vue'
-import StepsIcon from '@/components/Icons/StepsIcon.vue'
-import Section from '@/components/Section.vue'
-import PinIcon from '@/components/Icons/PinIcon.vue'
-import UserDropdown from '@/components/UserDropdown.vue'
-import SquareAsterisk from '@/components/Icons/SquareAsterisk.vue'
-import LeadsIcon from '@/components/Icons/LeadsIcon.vue'
-import DealsIcon from '@/components/Icons/DealsIcon.vue'
-import ContactsIcon from '@/components/Icons/ContactsIcon.vue'
-import OrganizationsIcon from '@/components/Icons/OrganizationsIcon.vue'
-import NoteIcon from '@/components/Icons/NoteIcon.vue'
-import TaskIcon from '@/components/Icons/TaskIcon.vue'
-import PhoneIcon from '@/components/Icons/PhoneIcon.vue'
-import CollapseSidebar from '@/components/Icons/CollapseSidebar.vue'
-import NotificationsIcon from '@/components/Icons/NotificationsIcon.vue'
-import HelpIcon from '@/components/Icons/HelpIcon.vue'
-import SidebarLink from '@/components/SidebarLink.vue'
-import Notifications from '@/components/Notifications.vue'
-import Settings from '@/components/Settings/Settings.vue'
-import { viewsStore } from '@/stores/views'
-import {
-  unreadNotificationsCount,
-  notificationsStore,
-} from '@/stores/notifications'
-import { usersStore } from '@/stores/users'
-import { sessionStore } from '@/stores/session'
-import { showSettings, activeSettingsPage } from '@/composables/settings'
-import { showChangePasswordModal } from '@/composables/modals'
-import { FeatherIcon, call } from 'frappe-ui'
-import {
-  SignupBanner,
-  TrialBanner,
-  HelpModal,
-  GettingStartedBanner,
-  useOnboarding,
-  showHelpModal,
-  minimize,
-  IntermediateStepModal,
-} from 'frappe-ui/frappe'
-import { capture } from '@/telemetry'
-import router from '@/router'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useStorage } from '@vueuse/core'
-import { ref, reactive, computed, h, markRaw, onMounted } from 'vue'
+import { FeatherIcon } from 'frappe-ui'
+import { SignupBanner, TrialBanner } from 'frappe-ui/frappe'
+import router from '@/router'
+import { capture } from '@/telemetry'
 
+// ── Icons ──────────────────────────────────────────────────────────────────
+import LucideArchive         from '~icons/lucide/archive'
+import LucideLayoutDashboard from '~icons/lucide/layout-dashboard'
+import LeadsIcon             from '@/components/Icons/LeadsIcon.vue'
+import ContactsIcon          from '@/components/Icons/ContactsIcon.vue'
+import NoteIcon              from '@/components/Icons/NoteIcon.vue'
+import TaskIcon              from '@/components/Icons/TaskIcon.vue'
+import PinIcon               from '@/components/Icons/PinIcon.vue'
+import CollapseSidebar       from '@/components/Icons/CollapseSidebar.vue'
+import NotificationsIcon     from '@/components/Icons/NotificationsIcon.vue'
 
-const { getPinnedViews, getPublicViews } = viewsStore()
+// ── Components ─────────────────────────────────────────────────────────────
+import UserDropdown  from '@/components/UserDropdown.vue'
+import Notifications from '@/components/Notifications.vue'
+import Settings      from '@/components/Settings/Settings.vue'
+
+// ── Stores ─────────────────────────────────────────────────────────────────
+import { viewsStore }                                    from '@/stores/views'
+import { unreadNotificationsCount, notificationsStore }  from '@/stores/notifications'
+import { usersStore }                                    from '@/stores/users'
+
+const { getPinnedViews, getPublicViews }   = viewsStore()
 const { toggle: toggleNotificationPanel } = notificationsStore()
+const { isManager, isSalesUser, users }   = usersStore()
 
+// ── State ──────────────────────────────────────────────────────────────────
 const isSidebarCollapsed = useStorage('isSidebarCollapsed', false)
+const isFCSite           = ref(window.is_fc_site)
+const isDemoSite         = ref(window.is_demo_site)
 
-const isFCSite = ref(window.is_fc_site)
-const isDemoSite = ref(window.is_demo_site)
+// Tracks open/closed per group by index
+const openDropdowns = reactive({})
 
-// single leads toggle state
-const openDropdown = reactive({})
-
-function toggleDropdown(key) {
-  // ensure key is defined
-  if (!key) return
-  openDropdown[key] = !openDropdown[key]
+function toggleGroup(idx) {
+  openDropdowns[idx] = !openDropdowns[idx]
 }
 
-import { statusesStore } from '@/stores/statuses'
+// ── Sub-links definitions ──────────────────────────────────────────────────
+const leadsSubLinks = [
+  { label: 'Create Lead',  action: 'create' },
+  { label: 'New',          query: { status: 'New' } },
+  { label: 'Follow Up',    query: { status: 'Follow Up' } },
+  { label: 'No Answer',    query: { status: 'No Answer' } },
+  { label: 'Meeting',      query: { status: 'Meeting' } },
+  { label: 'Showing',      query: { status: 'Showing' } },
+  { label: 'Visiting',     query: { status: 'Visiting' } },
+  { label: 'Qualified',    query: { status: 'Qualified' } },
+  { label: 'Unqualified',  query: { status: 'Unqualified' } },
+]
 
-const statusStore = statusesStore()
+const inventorySubLinks = [
+  { label: 'Projects', to: { name: 'Inventory', query: { tab: 'projects' } } },
+  { label: 'Units',    to: { name: 'Inventory', query: { tab: 'units'     } } },
+]
 
-// number of top statuses to show in the sidebar (change as you like)
-const TOP_STATUS_COUNT = 8
-
-const dynamicStatusLinks = computed(() => {
-  if (!statusStore.statuses) return []   // <---- FIX
-
-  const candidateArrays = []
-  if (Array.isArray(statusStore.statuses?.lead)) candidateArrays.push(statusStore.statuses.lead)
-  if (Array.isArray(statusStore.statuses?.['CRM Lead'])) candidateArrays.push(statusStore.statuses['CRM Lead'])
-  if (Array.isArray(statusStore.statuses)) candidateArrays.push(statusStore.statuses)
-
-  const flat = candidateArrays.flat().filter(Boolean)
-  const mapped = flat.map(s => {
-    const val = s?.value || s?.name || s?.label || s
-    const lbl = s?.label || s?.name || s?.value || String(s)
-    return { label: lbl, value: val }
-  })
-
-  const seen = new Set()
-  const out = []
-  for (const s of mapped) {
-    if (!s.value || seen.has(s.value)) continue
-    seen.add(s.value)
-    out.push({ label: s.label, query: { status: s.value } })
-    if (out.length >= 8) break
-  }
-  return out
-})
-
-// leads sublinks — choose behavior per link using `query`, `path` or `action`
-const leadsSubLinks = computed(() => {
-  return [
-    { label: 'Create Lead', action: 'create' },
-
-    // Custom statuses you want
-    { label: 'Showing',     query: { status: 'Showing' } },
-    { label: 'Visiting',    query: { status: 'Visiting' } },
-    { label: 'Unqualified', query: { status: 'Unqualified' } },
-    { label: 'New',         query: { status: 'New' } },
-    { label: 'Follow Up',   query: { status: 'Follow Up' } },
-    { label: 'No Answer',   query: { status: 'No Answer' } },
-    { label: 'Meeting',     query: { status: 'Meeting' } },
-    { label: 'Qualified',   query: { status: 'Qualified' } },
-  ]
-})
-
-// leadsSubLinks already exists — below it add:
-
-const inventorySubLinks = computed(() => {
-  return [
-    { label: 'Projects', to: { name: 'Inventory', query: { tab: 'projects' } } },
-    { label: 'Units', to: { name: 'Inventory', query: { tab: 'units' } } },
-  ]
-})
-
-
-// navigation helper for sublinks (logs + router)
-async function navigateSublink(sublink) {
-  if (!sublink) return
-
-  // ✅ 1. CREATE → just open the modal
-  if (sublink.action === 'create') {
-    router.push({
-      name: 'Leads',
-      query: { create: '1', _t: Date.now() }
-    }).catch(()=>{})
-
+// ── Navigate sublink ───────────────────────────────────────────────────────
+function navigateSublink(sub) {
+  if (!sub) return
+  if (sub.action === 'create') {
+    router.push({ name: 'Leads', query: { create: '1', _t: Date.now() } }).catch(() => {})
     return
   }
-
-  // 2. Filter by query
-  if (sublink.query) {
-    await router.push({ name: 'Leads', query: sublink.query }).catch(() => {})
-    await nextTick()
-    viewControls.value?.reload?.()
-    return
-  }
-
-  // 3. Path link
-  if (sublink.path) {
-    await router.push({ path: sublink.path }).catch(() => {})
-    await nextTick()
-    viewControls.value?.reload?.()
-    return
-  }
-
-  // 4. Full route object
-  if (sublink.to) {
-    await router.push(sublink.to).catch(() => {})
-    await nextTick()
-    viewControls.value?.reload?.()
-  }
+  if (sub.query) { router.push({ name: 'Leads', query: sub.query }).catch(() => {}); return }
+  if (sub.to)    { router.push(sub.to).catch(() => {}); return }
+  if (sub.path)  { router.push({ path: sub.path }).catch(() => {}); return }
 }
 
-// helper to build a stable key for each dropdown (link)
-function linkKey(link, idx) {
-  // prefer a route name when available (stable), otherwise fall back to label+index
-  if (link?.to?.name) return `link:${String(link.to.name)}`
-  return `link:${String(link.label || 'unknown')}:${idx}`
+// ── Resolve `to` to always be a route object ──────────────────────────────
+function resolveTo(to) {
+  if (!to) return '/'
+  if (typeof to === 'string') return { name: to }
+  return to
 }
 
-const allViews = computed(() => {
-  const links = [
+// ── Main nav links ─────────────────────────────────────────────────────────
+const mainLinks = computed(() => {
+  const all = [
     {
-      label: 'Dashboard',
-      icon: LucideLayoutDashboard,
-      to: 'Dashboard',
+      label:     'Dashboard',
+      icon:      LucideLayoutDashboard,
+      to:        { name: 'Dashboard' },
       condition: () => isManager() || isSalesUser(),
     },
-
-    // SINGLE Leads entry (still navigates to Leads via `to`) + has sublinks via `views`
     {
       label: 'Leads',
-      icon: LeadsIcon,
-      to: { name: 'Leads' }, // main lead item still navigates to regular Leads view
-      views: leadsSubLinks.value || [],
+      icon:  LeadsIcon,
+      to:    { name: 'Leads' },
+      views: leadsSubLinks,
     },
-
     {
       label: 'Reservations',
-      icon: LucideArchive,
-      to: 'Reservations',
+      icon:  LucideArchive,
+      to:    { name: 'Reservations' },
     },
-
-   // {
-   //   label: 'Deals',
-   //   icon: DealsIcon,
-   //   to: 'Deals',
-   // },
     {
       label: 'Inventory',
-      icon: LucideArchive,
-      to: { name: 'Inventory' },
-      // add the sublinks so the Sidebar shows the caret + subitems
-      views: inventorySubLinks.value || [],
+      icon:  LucideArchive,
+      to:    { name: 'Inventory' },
+      views: inventorySubLinks,
     },
     {
       label: 'Contacts',
-      icon: ContactsIcon,
-      to: 'Contacts',
+      icon:  ContactsIcon,
+      to:    { name: 'Contacts' },
     },
     {
       label: 'Notes',
-      icon: NoteIcon,
-      to: 'Notes',
+      icon:  NoteIcon,
+      to:    { name: 'Notes' },
     },
     {
       label: 'Tasks',
-      icon: TaskIcon,
-      to: 'Tasks',
+      icon:  TaskIcon,
+      to:    { name: 'Tasks' },
     },
   ]
-
-  let _views = [
-    {
-      name: 'All Views',
-      hideLabel: true,
-      opened: true,
-      views: links.filter((link) => {
-        if (link.condition) return link.condition()
-        return true
-      }),
-    },
-  ]
-
-  if (getPublicViews().length) {
-    _views.push({
-      name: 'Public views',
-      opened: true,
-      views: parseView(getPublicViews()),
-    })
-  }
-
-  if (getPinnedViews().length) {
-    _views.push({
-      name: 'Pinned views',
-      opened: true,
-      views: parseView(getPinnedViews()),
-    })
-  }
-
-  return _views
+  return all.filter(l => (l.condition ? l.condition() : true))
 })
 
-function parseView(views) {
-  return views.map((view) => {
-    return {
-      label: view.label,
-      icon: getIcon(view.route_name, view.icon),
-      to: {
-        name: view.route_name,
-        params: { viewType: view.type || 'list' },
-        query: { view: view.name },
-      },
-    }
-  })
+// ── Parsed saved/pinned views ──────────────────────────────────────────────
+function parseViews(views) {
+  return views.map(v => ({
+    label: v.label,
+    to: {
+      name:   v.route_name,
+      params: { viewType: v.type || 'list' },
+      query:  { view: v.name },
+    },
+  }))
 }
 
-function getIcon(routeName, icon) {
-  if (icon) return h('div', { class: 'size-auto' }, icon)
+const parsedPublicViews = computed(() => parseViews(getPublicViews()))
+const parsedPinnedViews = computed(() => parseViews(getPinnedViews()))
 
-  switch (routeName) {
-    case 'Leads':
-      return LeadsIcon
-    case 'Deals':
-      return DealsIcon
-    case 'Contacts':
-      return ContactsIcon
-    case 'Organizations':
-      return OrganizationsIcon
-    case 'Notes':
-      return NoteIcon
-    case 'Call Logs':
-      return PhoneIcon
-    default:
-      return PinIcon
-  }
-}
-
-// onboarding
-const { user } = sessionStore()
-const { users, isManager, isSalesUser } = usersStore()
-//const { isOnboardingStepsCompleted, setUp } = useOnboarding('frappecrm')
-
-async function getFirstLead() {
-  let firstLead = localStorage.getItem('firstLead' + user)
-  if (firstLead) return firstLead
-  return await call('crm.api.onboarding.get_first_lead')
-}
-
-async function getFirstDeal() {
-  let firstDeal = localStorage.getItem('firstDeal' + user)
-  if (firstDeal) return firstDeal
-  return await call('crm.api.onboarding.get_first_deal')
-}
-
-const showIntermediateModal = ref(false)
-const currentStep = ref({})
-
-const steps = reactive([
-  {
-    name: 'setup_your_password',
-    title: __('Setup your password'),
-    icon: markRaw(SquareAsterisk),
-    completed: false,
-    onClick: () => {
-      minimize.value = true
-      showChangePasswordModal.value = true
-    },
-  },
-  {
-    name: 'create_first_lead',
-    title: __('Create your first lead'),
-    icon: markRaw(LeadsIcon),
-    completed: false,
-    onClick: () => {
-      minimize.value = true
-      router.push({ name: 'Leads' })
-    },
-  },
-  {
-    name: 'invite_your_team',
-    title: __('Invite your team'),
-    icon: markRaw(InviteIcon),
-    completed: false,
-    onClick: () => {
-      minimize.value = true
-      showSettings.value = true
-      activeSettingsPage.value = 'Invite User'
-    },
-    condition: () => isManager(),
-  },
-  {
-    name: 'convert_lead_to_deal',
-    title: __('Convert lead to deal'),
-    icon: markRaw(ConvertIcon),
-    completed: false,
-    dependsOn: 'create_first_lead',
-    onClick: async () => {
-      minimize.value = true
-
-      currentStep.value = {
-        title: __('Convert lead to deal'),
-        buttonLabel: __('Convert'),
-        videoURL: '/assets/crm/videos/convertToDeal.mov',
-        onClick: async () => {
-          showIntermediateModal.value = false
-          currentStep.value = {}
-
-          let lead = await getFirstLead()
-          if (lead) {
-            router.push({ name: 'Lead', params: { leadId: lead } })
-          } else {
-            router.push({ name: 'Leads' })
-          }
-        },
-      }
-      showIntermediateModal.value = true
-    },
-  },
-  {
-    name: 'create_first_task',
-    title: __('Create your first task'),
-    icon: markRaw(TaskIcon),
-    completed: false,
-    onClick: async () => {
-      minimize.value = true
-      let deal = await getFirstDeal()
-
-      if (deal) {
-        router.push({
-          name: 'Deal',
-          params: { dealId: deal },
-          hash: '#tasks',
-        })
-      } else {
-        router.push({ name: 'Tasks' })
-      }
-    },
-  },
-  {
-    name: 'create_first_note',
-    title: __('Create your first note'),
-    icon: markRaw(NoteIcon),
-    completed: false,
-    onClick: async () => {
-      minimize.value = true
-      let deal = await getFirstDeal()
-
-      if (deal) {
-        router.push({
-          name: 'Deal',
-          params: { dealId: deal },
-          hash: '#notes',
-        })
-      } else {
-        router.push({ name: 'Notes' })
-      }
-    },
-  },
-  {
-    name: 'add_first_comment',
-    title: __('Add your first comment'),
-    icon: markRaw(CommentIcon),
-    completed: false,
-    dependsOn: 'create_first_lead',
-    onClick: async () => {
-      minimize.value = true
-      let deal = await getFirstDeal()
-
-      if (deal) {
-        router.push({
-          name: 'Deal',
-          params: { dealId: deal },
-          hash: '#comments',
-        })
-      } else {
-        router.push({ name: 'Leads' })
-      }
-    },
-  },
-  {
-    name: 'send_first_email',
-    title: __('Send email'),
-    icon: markRaw(EmailIcon),
-    completed: false,
-    dependsOn: 'create_first_lead',
-    onClick: async () => {
-      minimize.value = true
-      let deal = await getFirstDeal()
-
-      if (deal) {
-        router.push({
-          name: 'Deal',
-          params: { dealId: deal },
-          hash: '#emails',
-        })
-      } else {
-        router.push({ name: 'Leads' })
-      }
-    },
-  },
-  {
-    name: 'change_deal_status',
-    title: __('Change deal status'),
-    icon: markRaw(StepsIcon),
-    completed: false,
-    dependsOn: 'convert_lead_to_deal',
-    onClick: async () => {
-      minimize.value = true
-
-      currentStep.value = {
-        title: __('Change deal status'),
-        buttonLabel: __('Change'),
-        videoURL: '/assets/crm/videos/changeDealStatus.mov',
-        onClick: async () => {
-          showIntermediateModal.value = false
-          currentStep.value = {}
-
-          let deal = await getFirstDeal()
-          if (deal) {
-            router.push({
-              name: 'Deal',
-              params: { dealId: deal },
-              hash: '#activity',
-            })
-          } else {
-            router.push({ name: 'Leads' })
-          }
-        },
-      }
-      showIntermediateModal.value = true
-    },
-  },
-])
-
+// ── Init ───────────────────────────────────────────────────────────────────
 onMounted(async () => {
   await users.promise
-
-  const filteredSteps = steps.filter((step) => {
-    if (step.condition) {
-      return step.condition()
-    }
-    return true
-  })
-
-  setUp(filteredSteps)
 })
-
-// help center
-const articles = ref([
-  {
-    title: __('Introduction'),
-    opened: false,
-    subArticles: [
-      { name: 'introduction', title: __('Introduction') },
-      { name: 'setting-up', title: __('Setting up') },
-    ],
-  },
-  {
-    title: __('Settings'),
-    opened: false,
-    subArticles: [
-      { name: 'profile', title: __('Profile') },
-      { name: 'custom-branding', title: __('Custom branding') },
-      { name: 'home-actions', title: __('Home actions') },
-      { name: 'invite-users', title: __('Invite users') },
-    ],
-  },
-  {
-    title: __('Masters'),
-    opened: false,
-    subArticles: [
-      { name: 'lead', title: __('Lead') },
-      { name: 'deal', title: __('Deal') },
-      { name: 'contact', title: __('Contact') },
-      { name: 'organization', title: __('Organization') },
-      { name: 'note', title: __('Note') },
-      { name: 'task', title: __('Task') },
-      //{ name: 'call-log', title: __('Call log') },
-      //{ name: 'email-template', title: __('Email template') },
-    ],
-  },
-  {
-    title: __('Capturing leads'),
-    opened: false,
-    subArticles: [{ name: 'web-form', title: __('Web form') }],
-  },
-  {
-    title: __('Views'),
-    opened: false,
-    subArticles: [
-      { name: 'view', title: __('Saved view') },
-      { name: 'public-view', title: __('Public view') },
-      { name: 'pinned-view', title: __('Pinned view') },
-    ],
-  },
-  {
-    title: __('Other features'),
-    opened: false,
-    subArticles: [
-      { name: 'email-communication', title: __('Email communication') },
-      { name: 'comment', title: __('Comment') },
-      { name: 'data', title: __('Data') },
-      { name: 'service-level-agreement', title: __('Service level agreement') },
-      { name: 'assignment-rule', title: __('Assignment rule') },
-      { name: 'notification', title: __('Notification') },
-    ],
-  },
-  {
-    title: __('Customization'),
-    opened: false,
-    subArticles: [
-      { name: 'custom-fields', title: __('Custom fields') },
-      { name: 'custom-actions', title: __('Custom actions') },
-      { name: 'custom-statuses', title: __('Custom statuses') },
-      { name: 'custom-list-actions', title: __('Custom list actions') },
-      { name: 'quick-entry-layout', title: __('Quick entry layout') },
-    ],
-  },
-  {
-    title: __('Integration'),
-    opened: false,
-    subArticles: [
-      { name: 'twilio', title: __('Twilio') },
-      { name: 'exotel', title: __('Exotel') },
-      { name: 'whatsapp', title: __('WhatsApp') },
-      { name: 'erpnext', title: __('ERPNext') },
-    ],
-  },
-  {
-    title: __('Frappe CRM mobile'),
-    opened: false,
-    subArticles: [
-      { name: 'mobile-app-installation', title: __('Mobile app installation') },
-    ],
-  },
-])
 </script>
+
+<style scoped>
+/* ─────────────────────────────────────────────
+   Design tokens
+───────────────────────────────────────────── */
+.sidebar-root {
+  --sb-bg:            #FAFAFA;
+  --sb-border:        #E8E8E8;
+  --sb-active-bg:     #111111;
+  --sb-active-fg:     #FFFFFF;
+  --sb-hover-bg:      #EFEFEF;
+  --sb-fg:            #3A3A3A;
+  --sb-muted-fg:      #999999;
+  --sb-icon-clr:      #6B6B6B;
+  --sb-badge-bg:      #111111;
+  --sb-badge-fg:      #FFFFFF;
+  --sb-divider:       #E8E8E8;
+  --sb-section-fg:    #AAAAAA;
+  --sb-sublink-fg:    #707070;
+  --sb-radius:        8px;
+  --sb-item-h:        34px;
+  --sb-icon-sz:       15px;
+  --t:                0.16s ease;
+
+  background: var(--sb-bg);
+  border-right: 1px solid var(--sb-border);
+  font-family: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
+  transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Width states (controlled by Tailwind in parent if desired, or CSS here) */
+.sidebar-expanded  { width: 220px; min-width: 220px; }
+.sidebar-collapsed { width: 48px;  min-width: 48px;  }
+
+/* ─────────────────────────────────────────────
+   Scrollbar
+───────────────────────────────────────────── */
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+.scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* ─────────────────────────────────────────────
+   Regions
+───────────────────────────────────────────── */
+.sidebar-top {
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--sb-border);
+}
+
+.sidebar-body {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 6px 5px;
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-footer {
+  flex-shrink: 0;
+  padding: 5px;
+  border-top: 1px solid var(--sb-border);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* ─────────────────────────────────────────────
+   Helpers
+───────────────────────────────────────────── */
+.nav-divider {
+  height: 1px;
+  background: var(--sb-divider);
+  margin: 5px 3px;
+  flex-shrink: 0;
+}
+
+.nav-section-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--sb-section-fg);
+  padding: 5px 8px 3px;
+}
+
+.nav-section-gap {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+/* ─────────────────────────────────────────────
+   Nav item
+───────────────────────────────────────────── */
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: var(--sb-item-h);
+  padding: 0 9px;
+  border-radius: var(--sb-radius);
+  color: var(--sb-fg);
+  font-size: 13px;
+  font-weight: 440;
+  letter-spacing: -0.01em;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--t), color var(--t);
+  position: relative;
+  white-space: nowrap;
+  overflow: hidden;
+  /* reset button styles */
+  background: transparent;
+  border: none;
+  outline: none;
+}
+
+.nav-item:hover {
+  background: var(--sb-hover-bg);
+  color: #111;
+}
+
+.nav-item:hover .nav-icon { color: #111; }
+
+/* Active */
+.nav-item--active {
+  background: var(--sb-active-bg) !important;
+  color: var(--sb-active-fg) !important;
+  font-weight: 500;
+}
+.nav-item--active .nav-icon { color: #FFF !important; }
+
+/* Muted (collapse button) */
+.nav-item--muted {
+  color: var(--sb-muted-fg);
+  font-size: 12.5px;
+}
+.nav-item--muted:hover { color: #333; }
+
+/* Collapsed state — center the icon */
+.nav-item--collapsed {
+  justify-content: center;
+  padding: 0;
+  width: 36px;
+  margin-inline: auto;
+}
+
+/* Main link inside group takes remaining space */
+.nav-item--main { flex: 1; min-width: 0; }
+
+/* ─────────────────────────────────────────────
+   Icon
+───────────────────────────────────────────── */
+.nav-icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  color: var(--sb-icon-clr);
+  transition: color var(--t);
+}
+
+.icon {
+  width: var(--sb-icon-sz);
+  height: var(--sb-icon-sz);
+}
+
+/* ─────────────────────────────────────────────
+   Label
+───────────────────────────────────────────── */
+.nav-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ─────────────────────────────────────────────
+   Badge
+───────────────────────────────────────────── */
+.nav-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--sb-badge-bg);
+  color: var(--sb-badge-fg);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.nav-badge-dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #EF4444;
+  border: 1.5px solid var(--sb-bg);
+  pointer-events: none;
+}
+
+/* ─────────────────────────────────────────────
+   Nav group (item + caret + sublinks)
+───────────────────────────────────────────── */
+.nav-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.nav-group-header {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* When collapsed, the caret button is gone (v-if) so this just centers the icon button */
+.nav-group-header--collapsed {
+  justify-content: center;
+}
+
+/* ─────────────────────────────────────────────
+   Caret
+───────────────────────────────────────────── */
+.nav-caret {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  color: #C0C0C0;
+  cursor: pointer;
+  transition: background var(--t), color var(--t), transform 0.2s ease;
+  background: transparent;
+  border: none;
+  outline: none;
+}
+
+.nav-caret:hover {
+  background: var(--sb-hover-bg);
+  color: #444;
+}
+
+.nav-caret--open {
+  color: #555;
+  transform: rotate(90deg);
+}
+
+/* ─────────────────────────────────────────────
+   Sublinks
+───────────────────────────────────────────── */
+.sublinks {
+  display: flex;
+  flex-direction: column;
+  margin: 2px 0 3px 17px;
+  padding-left: 9px;
+  border-left: 1.5px solid var(--sb-divider);
+  overflow: hidden;
+}
+
+.sublink {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  font-weight: 400;
+  color: var(--sb-sublink-fg);
+  text-align: left;
+  cursor: pointer;
+  width: 100%;
+  transition: background var(--t), color var(--t);
+  white-space: nowrap;
+  overflow: hidden;
+  background: transparent;
+  border: none;
+  outline: none;
+}
+
+.sublink:hover {
+  background: var(--sb-hover-bg);
+  color: #111;
+}
+
+.sublink:hover .sublink-pip {
+  background: #333;
+  transform: scale(1.5);
+}
+
+.sublink-pip {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #D0D0D0;
+  flex-shrink: 0;
+  transition: background var(--t), transform 0.15s ease;
+}
+
+.sublink-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ─────────────────────────────────────────────
+   Submenu transition (height + fade)
+───────────────────────────────────────────── */
+.submenu-enter-active {
+  transition: max-height 0.24s cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 0.2s ease;
+  max-height: 500px;
+}
+.submenu-leave-active {
+  transition: max-height 0.18s cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 0.14s ease;
+}
+.submenu-enter-from,
+.submenu-leave-to {
+  max-height: 0 !important;
+  opacity: 0;
+}
+.submenu-enter-to,
+.submenu-leave-from {
+  max-height: 500px;
+  opacity: 1;
+}
+</style>
