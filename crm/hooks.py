@@ -231,7 +231,12 @@ scheduler_events = {
         "*/15 * * * *": [
 			"crm.lead_syncing.background_sync.sync_leads_from_sources_15_minutes"
 		],
+		 "*/1 * * * *": [
+            "crm.reminder_runner.run_reminders_locked",
+            "crm.api.task_status.update_overdue_tasks"  # تحديث المهام المتأخرة كل دقيقة
+        ]
 	}
+
 }
 
 # Testing
