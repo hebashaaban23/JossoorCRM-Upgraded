@@ -228,7 +228,7 @@ import NotificationsIcon     from '@/components/Icons/NotificationsIcon.vue'
 import UserDropdown  from '@/components/UserDropdown.vue'
 import Notifications from '@/components/Notifications.vue'
 import Settings      from '@/components/Settings/Settings.vue'
-
+import CalendarIcon from '@/components/Icons/CalendarIcon.vue'
 // ── Stores ─────────────────────────────────────────────────────────────────
 import { viewsStore }                                    from '@/stores/views'
 import { unreadNotificationsCount, notificationsStore }  from '@/stores/notifications'
@@ -323,6 +323,12 @@ const mainLinks = computed(() => {
       icon:  NoteIcon,
       to:    { name: 'Notes' },
     },
+   // {
+ // label: 'Calendar',
+  //icon:  CalendarIcon,
+  //to:    { name: 'Calendar' },
+//},
+    
     {
       label: 'Tasks',
       icon:  TaskIcon,

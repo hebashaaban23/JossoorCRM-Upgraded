@@ -114,6 +114,11 @@ const routes = [
     name: 'Notes',
     component: () => import('@/pages/Notes.vue'),
   },
+   // {
+   // path: '/calendar',
+   // name: 'Calendar',
+   // component: () => import('@/pages/Calendar.vue'),
+  //},
   {
     alias: '/tasks',
     path: '/tasks/view/:viewType?',
