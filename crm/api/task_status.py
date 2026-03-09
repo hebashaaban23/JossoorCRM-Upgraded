@@ -131,4 +131,3 @@ def update_all_overdue_tasks_now():
 			"success": False,
 			"error": str(e)
 		}
-
