@@ -476,7 +476,7 @@
   },
   {
    "fieldname": "property_year_built",
-   "fieldtype": "Int",
+   "fieldtype": "Data",
    "label": "Year Built"
   },
   {
@@ -513,9 +513,8 @@
   },
   {
    "fieldname": "property_finishing",
-   "fieldtype": "Select",
-   "label": "Finishing Level",
-   "options": "\nCore & Shell\nSemi-Finished\nFully Finished\nSuper Lux\nUltra Lux"
+   "fieldtype": "Data",
+   "label": "Finishing Level"
   },
   {
    "fieldname": "property_features",
@@ -544,9 +543,8 @@
   },
   {
    "fieldname": "property_payment",
-   "fieldtype": "Select",
-   "label": "Payment Method",
-   "options": "\nCash\nInstallment\nMortgage\nBank Loan"
+   "fieldtype": "Int",
+   "label": "Payment Method"
   },
   {
    "fieldname": "property_down_payment",

@@ -101,7 +101,7 @@ async function fetchComments() {
     comments.value.push(...items)
     if (items.length) cursor.value = items[items.length-1].creation
   } catch (e) {
-    error.value = e?.message || 'Failed to load FeedBacks'
+    error.value = e?.message || 'Failed to load Activities'
   } finally {
     loading.value = false
   }
@@ -141,7 +141,7 @@ async function addComment() {
         reference_doctype: props.doctype,
         reference_name: props.name,
         // Format: Type:::Title
-        subject: `${newType.value || 'Feedback'}:::${newTitle.value.trim()}`,
+        subject: `${newType.value || 'Activity'}:::${newTitle.value.trim()}`,
         content: newContent.value,
         comment_type: 'Comment',
       },
@@ -174,10 +174,10 @@ async function addComment() {
     reminderDatetime.value = ''
 
     await resetAndLoad()
-    toast.success(__('FeedBack added'))
+    toast.success(__('Activity added'))
     emit('update:show', false)
   } catch (e) {
-    error.value = e?.messages?.[0] || e?.message || 'Failed to add FeedBack'
+    error.value = e?.messages?.[0] || e?.message || 'Failed to add Activity'
   } finally {
     sending.value = false
   }
@@ -199,9 +199,9 @@ async function saveEdit() {
     })
     editing.value = null
     await resetAndLoad()
-    toast.success(__('FeedBack updated'))
+    toast.success(__('Activity updated'))
   } catch (e) {
-    error.value = e?.message || 'Failed to update FeedBack'
+    error.value = e?.message || 'Failed to update Activity'
   } finally {
     savingEdit.value = false
   }

@@ -162,14 +162,14 @@
       :value="data[field.fieldname]"
       :placeholder="getPlaceholder(field)"
       :description="field.description"
-      @change="fieldChange($event.target.value, field)"
+      @update:modelValue="fieldChange($event, field)"
     />
     <Password
       v-else-if="field.fieldtype === 'Password'"
       :value="data[field.fieldname]"
       :placeholder="getPlaceholder(field)"
       :description="field.description"
-      @change="fieldChange($event.target.value, field)"
+      @input="fieldChange($event, field)"
     />
     <FormattedInput
       v-else-if="field.fieldtype === 'Int'"
@@ -178,7 +178,9 @@
       :value="data[field.fieldname] || '0'"
       :disabled="Boolean(field.read_only)"
       :description="field.description"
-      @change="fieldChange($event.target.value, field)"
+      @update:modelValue="fieldChange($event, field)"
+      @change="fieldChange($event, field)"
+      @input="fieldChange($event, field)"
     />
     <FormattedInput
       v-else-if="field.fieldtype === 'Percent'"
@@ -187,7 +189,9 @@
       :placeholder="getPlaceholder(field)"
       :disabled="Boolean(field.read_only)"
       :description="field.description"
-      @change="fieldChange(flt($event.target.value), field)"
+      @update:modelValue="fieldChange($event, field)"
+      @change="fieldChange($event, field)"
+      @input="fieldChange($event, field)"
     />
     <FormattedInput
       v-else-if="field.fieldtype === 'Float'"
@@ -196,7 +200,9 @@
       :placeholder="getPlaceholder(field)"
       :disabled="Boolean(field.read_only)"
       :description="field.description"
-      @change="fieldChange(flt($event.target.value), field)"
+      @update:modelValue="fieldChange($event, field)"
+      @change="fieldChange($event, field)"
+      @input="fieldChange($event, field)"
     />
     <FormattedInput
       v-else-if="field.fieldtype === 'Currency'"
@@ -205,7 +211,7 @@
       :placeholder="getPlaceholder(field)"
       :disabled="Boolean(field.read_only)"
       :description="field.description"
-      @change="fieldChange(flt($event.target.value), field)"
+      @update:modelValue="fieldChange($event, field)"
     />
     <FormControl
       v-else
@@ -214,7 +220,7 @@
       :value="getDataValue(data[field.fieldname], field)"
       :disabled="Boolean(field.read_only)"
       :description="field.description"
-      @change="fieldChange($event.target.value, field)"
+      @update:modelValue="fieldChange($event, field)"
     />
   </div>
 </template>
@@ -359,7 +365,21 @@ const getOptions = (options) => {
 }
 
 function fieldChange(value, df) {
-  value = typeof value === 'object' && value !== null ? value.value : value
+  console.log(`Field [${df.fieldname}] change attempt:`, value)
+  if (value && typeof value === 'object' && value.target) {
+    value = value.target.value
+  }
+  
+  // Normalize values for better comparison
+  if (value === undefined) value = null
+  if (typeof value === 'string' && value.trim() === '') value = null
+
+  if (['Int', 'Float', 'Currency', 'Percent'].includes(df.fieldtype)) {
+    const numericValue = flt(value)
+    console.log(`Field [${df.fieldname}] numeric normalization: ${value} -> ${numericValue}`)
+    value = numericValue
+  }
+
   if (isGridRow) {
     triggerOnChange(df.fieldname, value, data.value)
   } else {

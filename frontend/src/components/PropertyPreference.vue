@@ -1,5 +1,8 @@
 <template>
-  <div v-if="leadData" class="flex flex-col gap-6 p-6">
+  <div v-if="leadData" class="flex flex-col gap-4 p-4 pt-0">
+    <div class="flex items-center justify-end max-w-7xl mx-auto w-full py-0 mb-0">
+      <Button variant="solid" :label="__('Save')" :loading="isSaving" :disabled="!props.document.isDirty" @click="saveLead" />
+    </div>
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 max-w-7xl mx-auto w-full">
       <!-- Card 1: Location & Type -->
       <div class="bg-white border border-gray-100 rounded-xl shadow-sm p-6 flex flex-col h-full">
@@ -50,6 +53,9 @@
             <Button variant="ghost" class="hover:bg-gray-50" @click="showCreateNoteModal = true">
               <template #icon><FeatherIcon name="plus" class="h-6 w-6 text-blue-500" /></template>
             </Button>
+            <Button v-if="currentNote" variant="ghost" class="hover:bg-red-50" @click="confirmDeleteNote">
+              <template #icon><FeatherIcon name="trash-2" class="h-5 w-5 text-red-500" /></template>
+            </Button>
           </div>
         </div>
         
@@ -98,39 +104,10 @@ import { call, Button, Dialog, FormControl, toast, FeatherIcon } from 'frappe-ui
 import { formatDate } from '@/utils'
 import NoteIcon from '@/components/Icons/NoteIcon.vue'
 import Field from '@/components/FieldLayout/Field.vue'
+import LeadCommentsDialog from '@/components/LeadCommentsDialog.vue'
 import { usersStore } from '@/stores/users'
 import { getMeta } from '@/stores/meta'
-
-const props = defineProps({
-  leadData: Object,
-  docname: String,
-})
-
-const { getUser } = usersStore()
-const { doctypeMeta } = getMeta('CRM Lead')
-
-const fieldsArr = computed(() => doctypeMeta['CRM Lead']?.fields || [])
-
-function getField(fieldname) {
-    return fieldsArr.value.find(f => f.fieldname === fieldname)
-}
-
-// Provide context for Field.vue
-provide('data', toRef(props, 'leadData'))
-provide('doctype', 'CRM Lead')
-provide('preview', ref(false))
-provide('isGridRow', ref(false))
-
 const showCreateNoteModal = ref(false)
-const savingNote = ref(false)
-const notes = ref([])
-const currentNoteIndex = ref(0)
-const currentNote = computed(() => notes.value[currentNoteIndex.value] || null)
-
-const newNote = reactive({
-    title: '',
-    content: ''
-})
 
 const card1FieldNames = [
   'property_city',
@@ -163,6 +140,42 @@ const card3FieldNames = [
   'property_ownership',
 ]
 
+const props = defineProps({
+  leadData: Object,
+  docname: String,
+  document: {
+    type: Object,
+    required: true,
+  },
+})
+
+const { getUser } = usersStore()
+const { doctypeMeta } = getMeta('CRM Lead')
+
+const fieldsArr = computed(() => doctypeMeta['CRM Lead']?.fields || [])
+
+function getField(fieldname) {
+    return fieldsArr.value.find(f => f.fieldname === fieldname)
+}
+
+// Provide context for Field.vue
+provide('data', computed(() => props.document.doc))
+provide('doctype', 'CRM Lead')
+provide('preview', ref(false))
+provide('isGridRow', ref(false))
+
+const savingNote = ref(false)
+const isSaving = ref(false)
+const notes = ref([])
+const currentNoteIndex = ref(0)
+const currentNote = computed(() => notes.value[currentNoteIndex.value] || null)
+
+const newNote = reactive({
+    title: '',
+    content: ''
+})
+
+
 async function fetchNotes() {
   try {
     const res = await call('crm.api.activities.get_activities', { name: props.docname })
@@ -171,7 +184,7 @@ async function fetchNotes() {
     // Descending order sort (latest first)
     notes.value = notesData.sort((a, b) => new Date(b.creation) - new Date(a.creation)).map(n => ({
       ...n,
-      owner_name: getUser(n.owner).full_name || n.owner
+      owner_name: getUser(n.owner)?.full_name || n.owner
     }))
     currentNoteIndex.value = 0
   } catch (e) {
@@ -212,6 +225,88 @@ async function addNote() {
         toast.error(__('Failed to add note'))
     } finally {
         savingNote.value = false
+    }
+}
+
+const emit = defineEmits(['saved'])
+
+onMounted(() => {
+  // Ensure we have an originalDoc for comparison if it wasn't set by parent
+  if (props.leadData && !props.document.originalDoc) {
+    console.log('PropertyPreference: Initializing originalDoc from leadData')
+    props.document.originalDoc = JSON.parse(JSON.stringify(props.leadData))
+  }
+})
+
+async function saveLead() {
+  if (!props.document?.doc || !props.document?.originalDoc) {
+    toast.error(__('Lead data not loaded'))
+    return
+  }
+
+  const updatedDoc = props.document.doc
+  const oldDoc = props.document.originalDoc
+
+  const allowedFields = [
+    ...card1FieldNames,
+    ...card2FieldNames,
+    ...card3FieldNames,
+  ]
+
+  const changes = allowedFields.reduce((acc, key) => {
+    if (JSON.stringify(updatedDoc[key]) !== JSON.stringify(oldDoc[key])) {
+      acc[key] = updatedDoc[key]
+    }
+    return acc
+  }, {})
+
+  if (!Object.keys(changes).length) {
+    toast.info(__('No changes to save'))
+    props.document.isDirty = false
+    return
+  }
+
+  isSaving.value = true
+  try {
+    await call('crm.api.doc.update_doc_fields', {
+      doctype: 'CRM Lead',
+      name: props.docname,
+      fieldname: changes,
+    })
+    toast.success(__('Changes saved successfully'))
+    props.document.isDirty = false
+    // Sync the original doc so dirty state resets correctly
+    if (props.document.originalDoc) {
+      Object.assign(props.document.originalDoc, changes)
+    }
+    emit('saved', changes)
+  } catch (err) {
+    console.error('Property Preference save failed:', err)
+    const msg = err?.messages?.[0] || err?.message || __('Failed to save changes')
+    toast.error(msg)
+  } finally {
+    isSaving.value = false
+  }
+}
+
+function confirmDeleteNote() {
+    if (!currentNote.value) return
+    if (confirm(__('Are you sure you want to delete this note?'))) {
+        deleteNote()
+    }
+}
+
+async function deleteNote() {
+    if (!currentNote.value) return
+    try {
+        await call('frappe.client.delete', {
+            doctype: 'FCRM Note',
+            name: currentNote.value.name
+        })
+        toast.success(__('Note deleted'))
+        await fetchNotes()
+    } catch (e) {
+        toast.error(__('Failed to delete note'))
     }
 }
 

@@ -27,14 +27,14 @@ export function useDocument(doctype, docname, resourceOverrides = {}) {
         onSuccess: async () => await setupFormScript(),
         onError: (err) => {
           error.value = err
-          if (err.exc_type === 'DoesNotExistError') {
-            toast.error(__(err.messages[0] || 'Document does not exist'))
+          if (err?.exc_type === 'DoesNotExistError') {
+            toast.error(__(err.messages?.[0] || 'Document does not exist'))
           }
-          if (err.exc_type === 'PermissionError') {
+          if (err?.exc_type === 'PermissionError') {
             toast.error(
               __(
-                err.messages[0] ||
-                  'You do not have permission to access this document',
+                err.messages?.[0] ||
+                'You do not have permission to access this document',
               ),
             )
           }
@@ -46,11 +46,20 @@ export function useDocument(doctype, docname, resourceOverrides = {}) {
             toast.success(__('Document updated successfully'))
           },
           onError: (err) => {
-            triggerOnError(err)
+            if (!err) {
+              toast.error(__('An unexpected error occurred'))
+              return
+            }
 
-            if (err.exc_type == 'MandatoryError') {
+            try {
+              triggerOnError(err)
+            } catch (e) {
+              console.error('triggerOnError failed:', e)
+            }
+
+            if (err.exc_type === 'MandatoryError') {
               const fieldName = err.messages
-                .map((msg) => {
+                ?.map((msg) => {
                   let arr = msg.split(': ')
                   return arr[arr.length - 1].trim()
                 })
@@ -59,11 +68,17 @@ export function useDocument(doctype, docname, resourceOverrides = {}) {
               return
             }
 
-            err.messages?.forEach((msg) => {
-              toast.error(msg)
-            })
+            if (err.messages && Array.isArray(err.messages)) {
+              err.messages.forEach((msg) => {
+                toast.error(msg)
+              })
+            } else if (err.message) {
+              toast.error(err.message)
+            } else if (typeof err === 'string') {
+              toast.error(err)
+            }
 
-            if (err.messages?.length === 0) {
+            if (!err.messages?.length && !err.message && typeof err !== 'string') {
               toast.error(__('An error occurred while updating the document'))
             }
 
