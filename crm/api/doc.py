@@ -1123,3 +1123,18 @@ def delete_bulk_docs(doctype, items, delete_linked=False):
     else:
         delete_bulk(doctype, items)
     return "success"
+
+
+@frappe.whitelist()
+def update_doc_fields(doctype, name, fieldname):
+	if isinstance(fieldname, str):
+		fieldname = json.loads(fieldname)
+
+	doc = frappe.get_doc(doctype, name)
+	doc.check_permission("write")
+
+	# Update fields using db_set to bypass mandatory checks for unrelated fields
+	for key, value in fieldname.items():
+		doc.db_set(key, value)
+
+	return doc.as_dict()

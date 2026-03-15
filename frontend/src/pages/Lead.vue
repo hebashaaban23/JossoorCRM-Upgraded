@@ -146,6 +146,8 @@
             :leadData="lead.data"
             doctype="CRM Lead"
             :docname="lead.data.name"
+            @beforeSave="saveChanges"
+            @afterSave="reloadAssignees"
           />
         </template>
         <!-- ================= Property Preference tab ================= -->
@@ -154,6 +156,8 @@
             v-if="lead?.data?.name"
             :leadData="lead.data"
             :docname="lead.data.name"
+            :document="document"
+            @saved="() => lead.reload()"
           />
         </template>
         <!-- ================= default tab ================= -->
@@ -402,6 +406,10 @@ const lead = createResource({
     errorMessage.value = ''
     // make sure lead.data is the pure doc object
     lead.data = doc
+
+    // Initial sync
+    syncLeadToDocument(doc)
+
     setupCustomizations(lead, {
       doc,
       $dialog,
@@ -550,6 +558,30 @@ const paymentPlans = createResource({
   onSuccess: hydratePlans,
 })
 
+// Sync lead.data to the shared document resource used by subcomponents
+watch(
+  () => lead.data,
+  (newData) => {
+    if (newData) {
+      syncLeadToDocument(newData)
+    }
+  },
+  { deep: true }
+)
+
+function syncLeadToDocument(doc) {
+  if (document && document.doc) {
+    // Only update if it's the same record or if document is empty
+    if (!document.doc.name || document.doc.name === doc.name) {
+      Object.assign(document.doc, JSON.parse(JSON.stringify(doc)))
+      
+      // Update originalDoc to the latest server state to clear dirty state
+      document.originalDoc = JSON.parse(JSON.stringify(doc))
+      document.isDirty = false
+    }
+  }
+}
+
 const hydratedPlans = ref([])
 
 async function hydratePlans(list = paymentPlans.data || []) {
@@ -631,25 +663,15 @@ function confirmDeletePaymentPlan(name) {
   if (ok) deletePaymentPlan(name)
 }
 
-async function createPaymentPlan() {
-  try {
-    const planTitle = `${__('Payment Plan for')} ${titleRef.value || lead.data?.name || ''}`.trim()
-    const payload = {
-      doctype: PAYMENT_PLAN_DOCTYPE,
-      title: planTitle,
-      plan_name: planTitle, // ensure plan_name is set so the list shows a proper name
-      lead: lead.data?.name,
-      status: DEFAULT_PLAN_STATUS,
-      years: DEFAULT_PLAN_YEARS,
-    }
-    const res = await call('frappe.client.insert', { doc: payload })
-    toast.success(__('Payment Plan created'))
-    openPaymentPlan(res?.name)
-    refreshPaymentPlans()
-  } catch (e) {
-    const msg = e?.messages?.[0] || e?.message || ''
-    toast.error(msg && msg.toLowerCase().includes('mandatory') ? msg : __('Could not create Payment Plan'))
-  }
+function createPaymentPlan() {
+  router.push({
+    name: 'PaymentPlan',
+    query: {
+      context: 'CRM Lead',
+      name: lead.data.name,
+      planDoctype: PAYMENT_PLAN_DOCTYPE,
+    },
+  })
 }
 
 const titleRef = computed(() => {
@@ -674,12 +696,17 @@ function updateLead(fieldname, value, callback) {
   value = Array.isArray(fieldname) ? '' : value
   if (!Array.isArray(fieldname) && validateRequired(fieldname, value)) return
 
-  createResource({
-    url: 'frappe.client.set_value',
-    params: { doctype: 'CRM Lead', name: props.leadId, fieldname, value },
-    auto: true,
-    onSuccess: () => { lead.reload(); reload.value = true; toast.success(__('Lead updated successfully')); callback?.() },
-    onError: (err) => { toast.error(err.messages?.[0] || __('Error updating lead')) },
+  call('crm.api.doc.update_doc_fields', {
+    doctype: 'CRM Lead',
+    name: props.leadId,
+    fieldname: { [fieldname]: value },
+  }).then(() => {
+    lead.reload()
+    reload.value = true
+    toast.success(__('Lead updated successfully'))
+    callback?.()
+  }).catch((err) => {
+    toast.error(err.messages?.[0] || __('Error updating lead'))
   })
 }
 function validateRequired(fieldname, value) {
@@ -694,10 +721,21 @@ function openEmailBox() {
   if (!['Emails', 'Comments', 'Activity'].includes(currentTab.name)) activities.value.changeTabTo('emails')
   nextTick(() => (activities.value.emailBox.show = true))
 }
-function saveChanges(data) {
-  document.save.submit(null, {
-    onSuccess: () => reloadAssignees(data),
-  })
+async function saveChanges(data) {
+  try {
+    await call('crm.api.doc.update_doc_fields', {
+      doctype: 'CRM Lead',
+      name: props.leadId,
+      fieldname: data,
+    })
+    toast.success(__('Changes saved successfully'))
+    lead.reload()
+    reloadAssignees(data)
+  } catch (err) {
+    console.error('Lead save failed:', err)
+    const msg = err?.messages?.[0] || err?.message || __('Failed to save changes')
+    toast.error(msg)
+  }
 }
 
 function reloadAssignees(data) {

@@ -16,14 +16,14 @@
         <!-- Header -->
         <div class="flex items-center gap-4 mb-6">
           <h2 class="text-xl font-semibold text-ink-gray-8">
-            {{ __('Feedback') }}
+            {{ __('Activity') }}
           </h2>
           <button
             @click="showFeedbackModal = true"
             class="px-3 py-1.5 bg-[#1a1c2e] text-white text-xs font-semibold rounded hover:bg-gray-800 transition-colors flex items-center gap-1"
           >
             <span class="text-sm">+</span>
-            {{ __('Add Feedback') }}
+            {{ __('Add Activity') }}
           </button>
         </div>
 
@@ -34,7 +34,7 @@
             <input
               v-model="searchQuery"
               type="text"
-              :placeholder="__('Search Feedback')"
+              :placeholder="__('Search Activity')"
               class="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-md outline-none text-sm font-medium text-gray-900 bg-white placeholder:text-gray-900"
             />
           </div>
@@ -42,7 +42,7 @@
             <Dropdown :options="activityTypeOptions">
               <template #default="{ open }">
                 <div class="w-56 px-4 py-2 border border-gray-200 rounded-md text-sm font-medium text-ink-gray-8 bg-white flex items-center justify-between cursor-pointer select-none">
-                  <span>{{ selectedType === 'All' ? __('Filter By Feedback Type') : (selectedType === 'Comment' ? __('Feedback') : selectedType) }}</span>
+                  <span>{{ selectedType === 'All' ? __('Filter By Activity Type') : (selectedType === 'Comment' ? __('Activity') : selectedType) }}</span>
                   <FeatherIcon name="chevron-down" class="h-4 w-4 text-ink-gray-8" />
                 </div>
               </template>
@@ -168,7 +168,7 @@ const showFeedbackModal = ref(false)
 
 const activityTypeOptions = [
   { label: 'All Types', onClick: () => { selectedType.value = 'All' } },
-  { label: 'Feedback', onClick: () => { selectedType.value = 'Comment' } },
+  { label: 'Activity', onClick: () => { selectedType.value = 'Comment' } },
   { label: 'Task', onClick: () => { selectedType.value = 'Task' } },
   { label: 'Call', onClick: () => { selectedType.value = 'Call' } },
   { label: 'WhatsApp', onClick: () => { selectedType.value = 'WhatsApp' } },
@@ -270,15 +270,15 @@ function getActivityTypeName(activity) {
 
 function getParsedFeedback(activity) {
   const subject = activity.subject || ''
-  let type = 'Feedback'
+  let type = 'Activity'
   let title = subject
 
   if (subject.includes(':::')) {
     const parts = subject.split(':::')
-    type = parts[0] === 'Comment' ? 'Feedback' : parts[0]
+    type = parts[0] === 'Comment' ? 'Activity' : parts[0]
     title = parts[1] || ''
   } else {
-    type = activity.comment_type === 'Comment' ? 'Feedback' : (activity.comment_type || 'Feedback')
+    type = activity.comment_type === 'Comment' ? 'Activity' : (activity.comment_type || 'Activity')
   }
 
   return { type, title }
