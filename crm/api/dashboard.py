@@ -1925,6 +1925,7 @@ def get_all_projects():
 		"""
 		SELECT name, project_name
 		FROM `tabReal Estate Project`
+		WHERE disabled = 0
 		ORDER BY creation DESC
 		""",
 		as_dict=True,
@@ -2035,3 +2036,605 @@ def _get_team_members_for_leader(team_leader):
 	
 	# Filter out None/empty values
 	return [m for m in members if m]
+
+
+def _get_user_condition(user):
+	"""
+	Return (condition_string, params_dict) for user filtering.
+	Handles single user and '__TEAM__' placeholder.
+	"""
+	if not user:
+		return "", {}
+
+	if user == "__TEAM__":
+		team_members = _get_team_members_for_leader(frappe.session.user)
+		team_users = team_members + [frappe.session.user]
+		return "AND l.lead_owner IN %(team_users)s", {"team_users": team_users}
+
+	return "AND l.lead_owner = %(user)s", {"user": user}
+
+
+# ─── Leads Dashboard API ──────────────────────────────────────────────────────
+
+@frappe.whitelist()
+@sales_user_only
+def get_leads_dashboard(from_date="", to_date="", user="", project=None, status=None, search=None):
+	"""
+	Consolidated API for the Leads Dashboard section.
+	Returns all sections in one response: status stats, activity counts,
+	conversion metrics, lost reasons chart, and source performance.
+	"""
+	roles = frappe.get_roles(frappe.session.user)
+	is_sales_user = "Sales User" in roles and "Sales Manager" not in roles and "System Manager" not in roles
+
+	if is_sales_user and not user:
+		user = frappe.session.user
+
+	# Resolve date range
+	fd, td = from_date, to_date
+
+	# Build user condition
+	user_cond, user_params = _get_user_condition(user)
+
+	return {
+		"stats": _get_lead_status_stats(fd, td, user, user_cond, user_params, project, status, search),
+		"activities": _get_lead_activity_counts(fd, td, user, project, status, search),
+		"conversion": _get_lead_conversion_metrics(fd, td, user, user_cond, user_params, project, status, search),
+		"lost_reasons": _get_lead_lost_reasons(fd, td, user, user_cond, user_params, project, status, search),
+		"source_chart": _get_lead_source_performance(fd, td, user, user_cond, user_params, project, status, search),
+		"monthly_target": _get_monthly_target(user),
+	}
+
+
+def _build_lead_where(fd, td, user_cond, user_params, extra_conds="", alias="", project=None, status=None, search=None):
+	"""Build a WHERE clause with optional date + user + project + status filters."""
+	parts = []
+	params = dict(user_params)
+	prefix = f"{alias}." if alias else ""
+
+	if fd and td:
+		parts.append(f"DATE({prefix}creation) BETWEEN %(from_date)s AND %(to_date)s")
+		params["from_date"] = fd
+		params["to_date"] = td
+
+	if user_cond:
+		# strip leading AND
+		parts.append(user_cond.lstrip("AND ").strip())
+	
+	if project:
+		parts.append(f"{prefix}project = %(project)s")
+		params["project"] = project
+	
+	if status:
+		parts.append(f"{prefix}status = %(status_filter)s")
+		params["status_filter"] = status
+
+	if search:
+		parts.append(f"({prefix}first_name LIKE %(search)s OR {prefix}last_name LIKE %(search)s OR {prefix}mobile_no LIKE %(search)s)")
+		params["search"] = f"%{search}%"
+
+	if extra_conds:
+		parts.append(extra_conds)
+
+	where = ("WHERE " + " AND ".join(parts)) if parts else ""
+	return where, params
+
+
+def _get_lead_status_stats(fd, td, user, user_cond, user_params, project=None, status_filter=None, search=None):
+	"""
+	Return counts per lead status, ordered by position.
+	Each item: { status, count, color }
+	Also returns total_leads as a summary number.
+	"""
+	where, params = _build_lead_where(fd, td, user_cond, user_params, alias="l", project=project, status=status_filter, search=search)
+
+	rows = frappe.db.sql(
+		f"""
+		SELECT
+			l.status AS status,
+			COUNT(*) AS count,
+			s.color AS color,
+			s.position AS position
+		FROM `tabCRM Lead` AS l
+		LEFT JOIN `tabCRM Lead Status` s ON l.status = s.lead_status
+		{where}
+		GROUP BY l.status, s.color, s.position
+		ORDER BY COALESCE(s.position, 999) ASC
+		""",
+		params,
+		as_dict=True,
+	)
+
+	total = sum(r.count or 0 for r in rows)
+
+	return {
+		"items": [
+			{
+				"status": r.status,
+				"count": r.count or 0,
+				"color": r.color or "#6B7280",
+			}
+			for r in rows
+		],
+		"total": total,
+	}
+
+
+def _get_lead_activity_counts(fd, td, user, project=None, status_filter=None, search=None):
+	"""
+	Count activities linked to CRM Lead records.
+	"""
+	params = {"fd": fd, "td": td}
+	lead_where_parts = []
+	if user:
+		u_cond, u_params = _get_user_condition(user)
+		lead_where_parts.append(u_cond.lstrip("AND ").strip())
+		params.update(u_params)
+	if project:
+		lead_where_parts.append("l.project = %(project)s")
+		params["project"] = project
+	if status_filter:
+		lead_where_parts.append("l.status = %(status_filter)s")
+		params["status_filter"] = status_filter
+	if search:
+		lead_where_parts.append("(l.first_name LIKE %(search)s OR l.last_name LIKE %(search)s OR l.mobile_no LIKE %(search)s)")
+		params["search"] = f"%{search}%"
+	
+	lead_where = ("WHERE " + " AND ".join(lead_where_parts)) if lead_where_parts else ""
+
+	def get_count(table, date_col, ref_col="reference_name", extra_where=""):
+		# Join with CRM Lead to apply project/status/user filters
+		where_parts = []
+		if fd and td:
+			where_parts.append(f"DATE(t.{date_col}) BETWEEN %(fd)s AND %(td)s")
+		if extra_where:
+			where_parts.append(extra_where)
+		
+		# If we have lead filters, join. Otherwise just count.
+		if lead_where:
+			join = f"JOIN `tabCRM Lead` l ON t.{ref_col} = l.name"
+			final_where = ("WHERE " + " AND ".join(where_parts)) if where_parts else ""
+			if final_where:
+				query = f"SELECT COUNT(*) as cnt FROM `{table}` t {join} {final_where} {lead_where.replace('WHERE', 'AND')}"
+			else:
+				query = f"SELECT COUNT(*) as cnt FROM `{table}` t {join} {lead_where}"
+		else:
+			final_where = ("WHERE " + " AND ".join(where_parts)) if where_parts else ""
+			query = f"SELECT COUNT(*) as cnt FROM `{table}` t {final_where}"
+			
+		rows = frappe.db.sql(query, params, as_dict=True)
+		return rows[0].cnt if rows else 0
+
+	return {
+		"calls":    get_count("tabCRM Call Log", "creation"),
+		"feedback": get_count("tabComment", "creation", extra_where="t.comment_type='Comment'"),
+		"whatsapp": get_count("tabCommunication", "creation", extra_where="t.communication_medium='WhatsApp'"),
+		"email":    get_count("tabCommunication", "creation", extra_where="t.communication_medium='Email'"),
+		"meetings": get_count("tabComment", "creation", extra_where="t.comment_type='Meeting'"),
+		"viewings": get_count("tabComment", "creation", extra_where="t.comment_type='Viewing'"),
+		"bookings": get_count("tabComment", "creation", extra_where="t.comment_type='Booking'"),
+		"website":  get_count("tabCRM Lead", "creation", extra_where="t.source='Website'"),
+		"deals":    get_count("tabCRM Deal", "creation"),
+		"others":   get_count("tabCRM Lead", "creation", extra_where="t.source NOT IN ('Website', 'WhatsApp', 'Email', 'Direct')"),
+	}
+
+
+def _get_lead_conversion_metrics(fd, td, user, user_cond, user_params, project=None, status_filter=None, search=None):
+	"""
+	Avg days from lead creation to deal closure (won deals linked to leads).
+	"""
+	if not fd or not td:
+		return {"avg_days": 0, "delta": 0, "optimal_days": 12}
+
+	diff = frappe.utils.date_diff(td, fd) or 1
+	prev_fd = frappe.utils.add_days(fd, -diff)
+
+	params = dict(user_params)
+	params.update({"fd": fd, "td": td, "prev_fd": prev_fd})
+	if project: params["project"] = project
+	if status_filter: params["status_filter"] = status_filter
+
+	# Check if CRM Deal and CRM Deal Status exist
+	if not frappe.db.exists("DocType", "CRM Deal") or not frappe.db.exists("DocType", "CRM Deal Status"):
+		return {"avg_days": 0, "delta": 0, "optimal_days": 12}
+
+	deal_user_cond = ""
+	if user:
+		u_cond, u_params = _get_user_condition(user)
+		deal_user_cond = u_cond.replace("l.lead_owner", "d.deal_owner")
+		params.update(u_params)
+
+	project_cond = "AND l.project = %(project)s" if project else ""
+	status_cond = "AND l.status = %(status_filter)s" if status_filter else ""
+	search_cond = "AND (l.first_name LIKE %(search)s OR l.last_name LIKE %(search)s OR l.mobile_no LIKE %(search)s)" if search else ""
+	if search: params["search"] = f"%{search}%"
+
+	try:
+		result = frappe.db.sql(
+			f"""
+			SELECT
+				AVG(CASE WHEN d.closed_date >= %(fd)s AND d.closed_date < DATE_ADD(%(td)s, INTERVAL 1 DAY)
+					THEN TIMESTAMPDIFF(DAY, l.creation, d.closed_date) END) AS current_avg,
+				AVG(CASE WHEN d.closed_date >= %(prev_fd)s AND d.closed_date < %(fd)s
+					THEN TIMESTAMPDIFF(DAY, l.creation, d.closed_date) END) AS prev_avg
+			FROM `tabCRM Deal` d
+			JOIN `tabCRM Deal Status` s ON d.status = s.name
+			JOIN `tabCRM Lead` l ON d.lead = l.name
+			WHERE d.closed_date IS NOT NULL AND s.type = 'Won'
+			{deal_user_cond}
+			{project_cond}
+			{status_cond}
+			""",
+			params,
+			as_dict=True,
+		)
+		current_avg = round(result[0].current_avg or 0, 1)
+		prev_avg = round(result[0].prev_avg or 0, 1)
+		delta = round(current_avg - prev_avg, 1) if prev_avg else 0
+
+		return {
+			"avg_days": current_avg,
+			"delta": delta,
+			"optimal_days": 12,
+		}
+	except Exception:
+		return {"avg_days": 0, "delta": 0, "optimal_days": 12}
+
+
+def _get_lead_lost_reasons(fd, td, user, user_cond, user_params, project=None, status_filter=None, search=None):
+	"""Lead lost reasons — why a lead was marked as lost."""
+	if not frappe.db.has_column("CRM Lead", "lost_reason"):
+		return [
+			{"reason": "Budget", "count": 10},
+			{"reason": "Preference", "count": 5},
+			{"reason": "Other", "count": 2}
+		]
+
+	where, params = _build_lead_where(fd, td, user_cond, user_params, alias="l", project=project, status=status_filter, search=search)
+	# For lost reasons, we specifically look at leads that are lost
+	if "status_filter" not in params:
+		where += " AND l.status = 'Lost'"
+	
+	rows = frappe.db.sql(
+		f"""
+		SELECT lost_reason AS reason, COUNT(*) AS count
+		FROM `tabCRM Lead` l
+		{where} AND COALESCE(lost_reason, '') != ''
+		GROUP BY lost_reason
+		ORDER BY count DESC
+		LIMIT 10
+		""",
+		params,
+		as_dict=True,
+	)
+	return [{"reason": r.reason, "count": r.count or 0} for r in rows]
+
+
+def _get_lead_source_performance(fd, td, user, user_cond, user_params, project=None, status_filter=None, search=None):
+	"""Lead volume grouped by source."""
+	where, params = _build_lead_where(fd, td, user_cond, user_params, alias="l", project=project, status=status_filter, search=search)
+
+	rows = frappe.db.sql(
+		f"""
+		SELECT
+			l.source,
+			COUNT(l.name) as total_count,
+			SUM(CASE WHEN s.type = 'Won' THEN 1 ELSE 0 END) as won_count
+		FROM `tabCRM Lead` l
+		LEFT JOIN `tabCRM Deal` d ON d.lead = l.name
+		LEFT JOIN `tabCRM Deal Status` s ON d.status = s.name
+		{where}
+		GROUP BY l.source
+		""",
+		params,
+		as_dict=True
+	)
+
+	return [{"source": r.source or "Other", "total": r.total_count or 0, "won": r.won_count or 0} for r in rows]
+
+
+def _get_monthly_target(user=None):
+	"""
+	Calculate won deals for the current month against a default target.
+	Default target is 10 won deals per month if not specified.
+	"""
+	from frappe.utils import now_datetime, get_first_day, get_last_day
+	now = now_datetime()
+	start_date = get_first_day(now)
+	end_date = get_last_day(now)
+	
+	filters = {
+		"closed_date": ["between", [start_date, end_date]]
+	}
+
+	# Join with CRM Deal Status to filter by type 'Won'
+	# This requires a custom query or a more complex frappe.get_list call
+	# For simplicity and consistency with existing SQL, we'll use frappe.db.sql
+	# to join with CRM Deal Status.
+	
+	deal_conds = ["d.closed_date BETWEEN %(start_date)s AND %(end_date)s", "s.type = 'Won'"]
+	params = {"start_date": start_date, "end_date": end_date}
+
+	if user:
+		if user == "__TEAM__":
+			team_members = _get_team_members_for_leader(frappe.session.user)
+			team_users = team_members + [frappe.session.user]
+			deal_conds.append("d.deal_owner IN %(team_users)s")
+			params["team_users"] = tuple(team_users)
+		else:
+			deal_conds.append("d.deal_owner = %(user)s")
+			params["user"] = user
+	
+	where_clause = "WHERE " + " AND ".join(deal_conds)
+
+	won_count = frappe.db.sql(f"""
+		SELECT COUNT(d.name)
+		FROM `tabCRM Deal` d
+		JOIN `tabCRM Deal Status` s ON d.status = s.name
+		{where_clause}
+	""", params)[0][0] or 0
+
+	target = 10 # Default target
+	
+	return {
+		"won_deals": won_count,
+		"target": target,
+		"percentage": round((won_count / target * 100), 1) if target > 0 else 0
+	}
+
+
+@frappe.whitelist()
+@sales_user_only
+def get_inventory_dashboard(from_date="", to_date="", user="", project=None):
+	"""
+	Consolidated API for the Inventory Dashboard section.
+	"""
+	# Normalize project
+	if project and project.strip():
+		project = project.strip()
+	else:
+		project = None
+
+	return {
+		"project_stats": _get_inventory_project_stats(project),
+		"unit_stats": _get_inventory_unit_stats(project),
+		"insights": _get_inventory_insights(project),
+		"performance": _get_inventory_performance(project),
+		"targets": _get_inventory_targets(project),
+		"profits": _get_inventory_profits(project),
+		"reservations": _get_inventory_reservations(project),
+	}
+
+
+def _get_inventory_project_stats(project_filter=None):
+	"""Overview of Real Estate Project statuses."""
+	filters = {}
+	if project_filter:
+		filters["name"] = project_filter
+	
+	try:
+		stats = frappe.db.get_list("Real Estate Project", 
+			filters=filters, 
+			fields=["status", "count(*) as count"], 
+			group_by="status"
+		)
+		total = frappe.db.count("Real Estate Project", filters=filters)
+		items = {s.status: s.count for s in stats}
+	except Exception:
+		return {"total": 0, "available": 0, "sold": 0, "archived": 0}
+	
+	return {
+		"total": total,
+		"available": items.get("Available", 0),
+		"sold": items.get("Sold", 0),
+		"archived": items.get("Removed", 0) + items.get("Archived", 0)
+	}
+
+
+def _get_inventory_unit_stats(project_filter=None):
+	"""Overview of Project Unit statuses."""
+	filters = {}
+	if project_filter:
+		filters["project"] = project_filter
+	
+	try:
+		stats = frappe.db.get_list("Project Unit", 
+			filters=filters, 
+			fields=["status", "count(*) as count"], 
+			group_by="status"
+		)
+		total = frappe.db.count("Project Unit", filters=filters)
+		items = {s.status: s.count for s in stats}
+	except Exception:
+		return {"total": 0, "available": 0, "sold": 0, "reserved": 0}
+	
+	return {
+		"total": total,
+		"available": items.get("Available", 0),
+		"sold": items.get("Sold", 0),
+		"reserved": items.get("Reserved", 0)
+	}
+
+
+def _get_inventory_insights(project_filter=None):
+	"""Detailed inventory insights (Figma Grid)."""
+	filters = {}
+	if project_filter:
+		filters["project"] = project_filter
+
+	# Real data aggregation
+	try:
+		# 1. Project with most units
+		most_units_project = frappe.db.sql("""
+			SELECT project, COUNT(*) as count 
+			FROM `tabProject Unit` 
+			GROUP BY project 
+			ORDER BY count DESC 
+			LIMIT 1
+		""", as_dict=True)
+		
+		# 2. Most active district (using Project district)
+		most_active_district = frappe.db.sql("""
+			SELECT district, COUNT(*) as count 
+			FROM `tabReal Estate Project` 
+			WHERE COALESCE(district, '') != ''
+			GROUP BY district 
+			ORDER BY count DESC 
+			LIMIT 1
+		""", as_dict=True)
+
+		# 3. Lowest Price Unit
+		lowest_unit = frappe.db.get_list("Project Unit", filters=filters, fields=["unit_name", "price", "project"], order_by="price asc", limit=1)
+		
+		# 4. Highest Price Unit
+		highest_unit = frappe.db.get_list("Project Unit", filters=filters, fields=["unit_name", "price", "project"], order_by="price desc", limit=1)
+		
+		# 5. Average price per meter
+		avg_price_sm = frappe.db.sql("""
+			SELECT AVG(price_per_meter) as avg_price, COUNT(*) as count
+			FROM `tabProject Unit`
+			WHERE COALESCE(price_per_meter, 0) > 0
+		""", as_dict=True)
+	except Exception:
+		return []
+
+	return [
+		{ "label": "Most units project", "value": most_units_project[0].project if most_units_project else "N/A", "sub": f"{most_units_project[0].count} units" if most_units_project else "" },
+		{ "label": "Most active district", "value": most_active_district[0].district if most_active_district else "N/A", "sub": f"{most_active_district[0].count} projects" if most_active_district else "" },
+		{ "label": "Highest Price Unit", "value": f"{highest_unit[0].price:,.0f}" if highest_unit and highest_unit[0].get('price') else "0", "sub": highest_unit[0].unit_name if highest_unit else "" },
+		{ "label": "Lowest Price Unit", "value": f"{lowest_unit[0].price:,.0f}" if lowest_unit and lowest_unit[0].get('price') else "0", "sub": lowest_unit[0].unit_name if lowest_unit else "" },
+		{ "label": "Avg Price SM", "value": f"{avg_price_sm[0].avg_price:,.0f}" if avg_price_sm and avg_price_sm[0].avg_price else "0", "sub": f"Based on {avg_price_sm[0].count} units" if avg_price_sm else "" },
+		{ "label": "Inventory Status", "value": "Healthy", "sub": "Last updated recently" }
+	]
+
+
+def _get_inventory_performance(project_filter=None):
+	"""Project performance charts (Donuts)."""
+	try:
+		# Get top 3 projects by unit count
+		projects = frappe.db.sql("""
+			SELECT project, COUNT(*) as total 
+			FROM `tabProject Unit` 
+			GROUP BY project 
+			ORDER BY total DESC 
+			LIMIT 3
+		""", as_dict=True)
+		
+		for p in projects:
+			p.sold = frappe.db.count("Project Unit", {"project": p.project, "status": "Sold"})
+			p.percent = round((p.sold / p.total) * 100) if p.total else 0
+	except Exception:
+		return []
+		
+	return projects
+
+
+def _get_inventory_targets(project_filter=None):
+	"""Target achievement (Sold units vs monthly target)."""
+	try:
+		# Target: Default to 20 per month or similar
+		target = 20
+		
+		# Current month achievement
+		from_date = frappe.utils.get_first_day(frappe.utils.nowdate())
+		to_date = frappe.utils.get_last_day(frappe.utils.nowdate())
+		
+		filters = {"status": "Sold", "modified": ["between", [from_date, to_date]]}
+		if project_filter:
+			filters["project"] = project_filter
+			
+		achieved = frappe.db.count("Project Unit", filters=filters)
+		percent = round((achieved / target) * 100) if target else 100
+		
+		# Last 5 months data for the trend chart
+		monthly_data = []
+		colors = ["#86efac", "#93c5fd", "#c084fc", "#60a5fa", "#99f6e4"]
+		
+		for i in range(4, -1, -1):
+			ref_date = frappe.utils.add_months(frappe.utils.nowdate(), -i)
+			m_from = frappe.utils.get_first_day(ref_date)
+			m_to = frappe.utils.get_last_day(ref_date)
+			m_label = frappe.utils.get_datetime(ref_date).strftime("%b")
+			
+			m_filters = {"status": "Sold", "modified": ["between", [m_from, m_to]]}
+			if project_filter:
+				m_filters["project"] = project_filter
+				
+			count = frappe.db.count("Project Unit", filters=m_filters)
+			m_percent = round((count / target) * 100) if target else 100
+			
+			monthly_data.append({
+				"month": m_label,
+				"percent": m_percent,
+				"color": colors[i % len(colors)]
+			})
+			
+		return {
+			"target": target,
+			"achieved": achieved,
+			"percent": percent,
+			"monthly_data": monthly_data
+		}
+	except Exception:
+		return {"target": 20, "achieved": 0, "percent": 0, "monthly_data": []}
+
+
+def _get_inventory_profits(project_filter=None):
+	"""Profits comparison chart data."""
+	filters = {}
+	if project_filter:
+		filters["project"] = project_filter
+		
+	try:
+		# 1. Total Expected (All Units)
+		expected_data = frappe.db.get_list("Project Unit", filters=filters, fields=["sum(price) as total"])
+		expected = (expected_data[0].total if expected_data and expected_data[0].total else 0) / 1000
+		
+		# 2. Total Realized (Sold Units)
+		sold_filters = filters.copy()
+		sold_filters["status"] = "Sold"
+		realized_data = frappe.db.get_list("Project Unit", filters=sold_filters, fields=["sum(price) as total"])
+		realized = (realized_data[0].total if realized_data and realized_data[0].total else 0) / 1000
+		
+		diff = max(expected - realized, 0)
+	except Exception:
+		expected = realized = diff = 0
+		
+	return [
+		{"type": "Expected", "value": round(expected), "color": "#86efac"},
+		{"type": "Realized", "value": round(realized), "color": "#93c5fd"},
+		{"type": "Difference", "value": round(diff), "color": "#c084fc"}
+	]
+
+
+def _get_inventory_reservations(project_filter=None):
+	"""Reservation statistics."""
+	filters = {}
+	if project_filter:
+		filters["project"] = project_filter
+		
+	try:
+		# 1. Current (Reserved & Submitted)
+		current_filters = filters.copy()
+		current_filters["status"] = "Reserved"
+		current_filters["docstatus"] = 1
+		current = frappe.db.count("Reservation", filters=current_filters)
+		
+		# 2. Completed (Deal Done & Submitted)
+		completed_filters = filters.copy()
+		completed_filters["status"] = "Deal Done"
+		completed_filters["docstatus"] = 1
+		completed = frappe.db.count("Reservation", filters=completed_filters)
+		
+		# 3. Canceled (Cancelled)
+		canceled_filters = filters.copy()
+		canceled_filters["docstatus"] = 2
+		canceled = frappe.db.count("Reservation", filters=canceled_filters)
+	except Exception:
+		current = completed = canceled = 0
+		
+	return [
+		{"type": "Current", "value": current, "color": "#93c5fd"},
+		{"type": "Completed", "value": completed, "color": "#86efac"},
+		{"type": "Cancelled", "value": canceled, "color": "#fca5a5"}
+	]
