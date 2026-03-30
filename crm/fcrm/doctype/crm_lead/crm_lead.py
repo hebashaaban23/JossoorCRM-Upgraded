@@ -27,6 +27,8 @@ class CRMLead(Document):
 		from frappe.types import DF
 
 		annual_revenue: DF.Currency
+		annual_revenue_note: DF.Data | None
+		assigned_to_display: DF.Text | None
 		communication_status: DF.Link | None
 		converted: DF.Check
 		duplicate_leads: DF.Table[DuplicateLeadEntry]
@@ -34,6 +36,7 @@ class CRMLead(Document):
 		email: DF.Data | None
 		facebook_form_id: DF.Data | None
 		facebook_lead_id: DF.Data | None
+		feedback: DF.Text | None
 		first_name: DF.Data
 		first_responded_on: DF.Datetime | None
 		first_response_time: DF.Duration | None
@@ -48,11 +51,12 @@ class CRMLead(Document):
 		last_response_time: DF.Duration | None
 		lead_name: DF.Data | None
 		lead_owner: DF.Link | None
+		lead_type: DF.Literal["", "Out Source", "Company"]
 		middle_name: DF.Data | None
 		mobile_no: DF.Data
 		naming_series: DF.Literal["CRM-LEAD-.YYYY.-"]
 		net_total: DF.Currency
-		no_of_employees: DF.Literal["1-10", "11-50", "51-200", "201-500", "501-1000", "1000+"]
+		no_of_employees: DF.Literal["", "1-10", "11-50", "51-200", "201-500", "501-1000", "1000+"]
 		notes: DF.TextEditor | None
 		organization: DF.Data | None
 		original_lead: DF.Check
@@ -60,21 +64,28 @@ class CRMLead(Document):
 		products: DF.Table[CRMProducts]
 		project: DF.Link | None
 		project_unit: DF.Link | None
-		property_city: DF.Literal["Cairo", "New Cairo"]
-		property_condition: DF.Literal["", "New", "Renovated", "Need Repair"]
-		property_decoration: DF.Data | None
-		property_features: DF.SmallText | None
-		property_floor: DF.Literal["", "Upper Floors", "Ground Floor"]
-		property_ownership: DF.Literal["", "Owned", "Rent"]
-		property_payment: DF.Literal["", "Cash", "Installment"]
-		property_price_range: DF.Currency
+		property_bathrooms: DF.Literal["", "1", "2", "3", "4", "5+"]
+		property_bedrooms: DF.Literal["", "Studio", "1", "2", "3", "4", "5", "6+"]
+		property_city: DF.Literal["", "Cairo", "New Cairo", "Nasr City", "Heliopolis", "Maadi", "6th of October", "Sheikh Zayed", "Zamalek", "New Administrative Capital", "Alexandria", "Giza"]
+		property_condition: DF.Literal["", "New / Off-Plan", "Under Construction", "Ready to Move", "Renovated", "Need Repair", "Old Building"]
+		property_decoration: DF.Literal["", "Furnished", "Semi-Furnished", "Unfurnished", "Core & Shell", "Semi-Finished", "Fully Finished", "Super Lux", "Ultra Lux"]
+		property_delivery_date: DF.Date | None
+		property_down_payment: DF.Percent
+		property_features: DF.Literal["", "Private Garden", "Private Pool", "Shared Pool", "Gym", "Garage", "Elevator", "Security / Gated", "Smart Home", "Sea Access", "Lake / Lagoon", "Golf Course View", "Pet Friendly", "Storage Room", "Maid Room", "Driver Room"]
+		property_finishing: DF.Data | None
+		property_floor: DF.Literal["", "Ground Floor", "1st Floor", "2nd Floor", "3rd Floor", "4th Floor", "5th Floor", "6th Floor", "7th Floor", "8th Floor", "9th Floor", "10th Floor", "High Floor (10+)", "Rooftop / Penthouse", "Basement", "No Preference"]
+		property_max_price: DF.Currency
+		property_min_price: DF.Currency
+		property_ownership: DF.Literal["", "Buy", "Rent", "Rent-to-Own"]
+		property_payment: DF.Literal["", "Cash", "Installments", "Mortgage"]
 		property_project: DF.Data | None
-		property_region: DF.Data | None
-		property_relation: DF.Literal["", "Stand Alone", "Project"]
+		property_region: DF.Literal["", "Maadi", "Degla", "Sarayat", "Zohour", "New Maadi", "Heliopolis", "Nasr City", "Madinet Nasr", "Zamalek", "Garden City", "Downtown Cairo", "Mohandessin", "Agouza", "Dokki", "Shoubra", "Shubra El Kheima", "New Cairo - 1st Settlement", "New Cairo - 5th Settlement", "New Cairo - 3rd Settlement", "Beit El Watan", "Al Rehab City", "Madinaty", "Mostakbal City", "Al Shorouk City", "Al Obour City", "New Administrative Capital - R1", "New Administrative Capital - R2", "New Administrative Capital - R3", "6th of October - Hay 1", "6th of October - Hay 2", "6th of October - Hay 3", "Sheikh Zayed - Hay 1", "Sheikh Zayed - Hay 2", "North Coast", "Ain Sokhna", "El Gouna", "Hurghada", "Sharm El Sheikh"]
+		property_relation: DF.Literal["", "Stand Alone", "Project", "Compound"]
 		property_space: DF.Int
-		property_subtype: DF.Data | None
-		property_type: DF.Literal["", "Residential", "Commercial", "Land"]
-		property_year_built: DF.Int
+		property_subtype: DF.Literal["", "Apartment", "Duplex", "Penthouse", "Studio", "Villa", "Twin House", "Townhouse", "Chalet", "Cabin", "Shop", "Showroom", "Warehouse", "Office", "Administrative Office", "Clinic", "Plot - Residential", "Plot - Commercial", "Plot - Industrial"]
+		property_type: DF.Literal["", "Residential", "Commercial", "Administrative", "Land"]
+		property_view: DF.Literal["", "Street View", "Garden View", "Pool View", "Lake View", "Sea View", "City View", "No Preference"]
+		property_year_built: DF.Data | None
 		response_by: DF.Datetime | None
 		rolling_responses: DF.Table[CRMRollingResponseTime]
 		salutation: DF.Link | None

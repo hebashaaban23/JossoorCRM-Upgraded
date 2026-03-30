@@ -1,90 +1,14 @@
 {
  "actions": [],
- "allow_events_in_timeline": 1,
  "allow_import": 1,
  "allow_rename": 1,
  "autoname": "naming_series:",
  "creation": "2023-07-24 12:19:39.616298",
- "modified": "2026-02-17 00:00:00.000000",
- "modified_by": "Administrator",
- "owner": "Administrator",
- "doctype": "DocType",
- "name": "CRM Lead",
- "module": "FCRM",
- "naming_rule": "By \"Naming Series\" field",
- "title_field": "lead_name",
- "image_field": "image",
- "sender_field": "email",
- "sender_name_field": "first_name",
  "default_view": "List",
- "sort_field": "modified",
- "sort_order": "DESC",
- "engine": "InnoDB",
- "row_format": "Dynamic",
+ "doctype": "DocType",
  "editable_grid": 1,
  "email_append_to": 1,
- "quick_entry": 1,
- "index_web_pages_for_search": 1,
- "show_title_field_in_link": 1,
- "grid_page_length": 50,
- "track_changes": 1,
- "track_seen": 1,
- "track_views": 1,
- "states": [
-  {
-   "color": "Red",
-   "title": "Original"
-  },
-  {
-   "color": "Yellow",
-   "title": "Duplicate"
-  }
- ],
- "links": [
-  {
-   "link_doctype": "Real Estate Project",
-   "link_fieldname": "project_name"
-  },
-  {
-   "link_doctype": "Unit",
-   "link_fieldname": "unit_name"
-  }
- ],
- "permissions": [
-  {
-   "role": "Sales Manager",
-   "read": 1,
-   "write": 1,
-   "create": 1,
-   "delete": 1,
-   "email": 1,
-   "export": 1,
-   "print": 1,
-   "report": 1,
-   "share": 1
-  },
-  {
-   "role": "Sales User",
-   "read": 1,
-   "write": 1,
-   "create": 1,
-   "delete": 1,
-   "email": 1,
-   "export": 1,
-   "print": 1,
-   "report": 1,
-   "share": 1
-  },
-  {
-   "role": "All",
-   "read": 1,
-   "email": 1,
-   "export": 1,
-   "print": 1,
-   "report": 1,
-   "share": 1
-  }
- ],
+ "engine": "InnoDB",
  "field_order": [
   "details",
   "naming_series",
@@ -99,12 +23,12 @@
   "phone",
   "website",
   "lead_type",
-   "assigned_to_display",
+  "assigned_to_display",
   "source",
   "territory",
   "industry",
   "job_title",
-    "feedback",
+  "feedback",
   "no_of_employees",
   "lead_owner",
   "status",
@@ -200,10 +124,10 @@
    "label": "Details"
   },
   {
+   "default": "CRM-LEAD-.YYYY.-",
    "fieldname": "naming_series",
    "fieldtype": "Select",
    "label": "Series",
-   "default": "CRM-LEAD-.YYYY.-",
    "options": "CRM-LEAD-.YYYY.-"
   },
   {
@@ -250,12 +174,12 @@
   {
    "fieldname": "mobile_no",
    "fieldtype": "Data",
-   "label": "Mobile No",
-   "options": "Phone",
-   "reqd": 1,
    "in_filter": 1,
    "in_list_view": 1,
-   "in_standard_filter": 1
+   "in_standard_filter": 1,
+   "label": "Mobile No",
+   "options": "Phone",
+   "reqd": 1
   },
   {
    "fieldname": "phone",
@@ -274,14 +198,14 @@
    "label": "Lead Type",
    "options": "\nOut Source\nCompany"
   },
-   {
-            "fieldname": "assigned_to_display",
-            "fieldtype": "Text",
-            "in_filter": 1,
-            "in_list_view": 1,
-            "in_standard_filter": 1,
-            "label": "Assigned To"
-        },
+  {
+   "fieldname": "assigned_to_display",
+   "fieldtype": "Text",
+   "in_filter": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Assigned To"
+  },
   {
    "fieldname": "source",
    "fieldtype": "Link",
@@ -305,12 +229,12 @@
    "fieldtype": "Data",
    "label": "Job Title"
   },
-   {
-            "description": "FeedBack field for old data please add comment instead ",
-            "fieldname": "feedback",
-            "fieldtype": "Text",
-            "label": "FeedBack"
-        },
+  {
+   "description": "FeedBack field for old data please add comment instead ",
+   "fieldname": "feedback",
+   "fieldtype": "Text",
+   "label": "FeedBack"
+  },
   {
    "fieldname": "no_of_employees",
    "fieldtype": "Select",
@@ -324,21 +248,21 @@
    "options": "User"
   },
   {
+   "default": "New",
    "fieldname": "status",
    "fieldtype": "Link",
+   "in_list_view": 1,
    "label": "Status",
    "options": "CRM Lead Status",
-   "default": "New",
    "reqd": 1,
-   "in_list_view": 1,
    "search_index": 1
   },
   {
+   "default": "New",
    "fieldname": "communication_status",
    "fieldtype": "Link",
    "label": "Communication Status",
-   "options": "CRM Communication Status",
-   "default": "Open"
+   "options": "CRM Communication Status"
   },
   {
    "fieldname": "column_break_details_1",
@@ -365,23 +289,23 @@
   {
    "fieldname": "last_comment",
    "fieldtype": "Small Text",
-   "label": "Latest Comment",
    "in_list_view": 1,
+   "label": "Latest Comment",
    "read_only": 1
   },
   {
+   "default": "0",
    "fieldname": "converted",
    "fieldtype": "Check",
-   "label": "Converted",
-   "default": "0",
    "in_list_view": 1,
-   "in_standard_filter": 1
+   "in_standard_filter": 1,
+   "label": "Converted"
   },
   {
    "fieldname": "image",
    "fieldtype": "Attach Image",
-   "label": "Image",
    "hidden": 1,
+   "label": "Image",
    "print_hide": 1
   },
   {
@@ -465,10 +389,10 @@
    "options": "\nStand Alone\nProject\nCompound"
   },
   {
+   "description": "Filled when Property Relation = Project",
    "fieldname": "property_project",
    "fieldtype": "Data",
-   "label": "Project Name",
-   "description": "Filled when Property Relation = Project"
+   "label": "Project Name"
   },
   {
    "fieldname": "column_break_prop4",
@@ -543,8 +467,8 @@
   },
   {
    "fieldname": "property_payment",
-   "fieldtype": "Int",
-   "label": "Payment Method"
+   "fieldtype": "Select",
+   "options": "\nCash\nInstallments\nMortgage"
   },
   {
    "fieldname": "property_down_payment",
@@ -700,23 +624,23 @@
    "label": "Duplicate Details"
   },
   {
-   "fieldname": "original_lead",
-   "fieldtype": "Check",
-   "label": "Original Lead",
    "default": "0",
    "description": "Lead has Duplicates",
+   "fieldname": "original_lead",
+   "fieldtype": "Check",
    "in_list_view": 1,
    "in_standard_filter": 1,
+   "label": "Original Lead",
    "read_only": 1,
    "set_only_once": 1
   },
   {
+   "default": "0",
    "fieldname": "is_duplicate",
    "fieldtype": "Check",
-   "label": "Duplicate",
-   "default": "0",
    "in_list_view": 1,
    "in_standard_filter": 1,
+   "label": "Duplicate",
    "read_only": 1,
    "set_only_once": 1
   },
@@ -724,8 +648,8 @@
    "fieldname": "duplicated_from",
    "fieldtype": "Link",
    "label": "From",
-   "options": "CRM Lead",
    "link_filters": "[[\"CRM Lead\",\"is_duplicate\",\"=\",1]]",
+   "options": "CRM Lead",
    "set_only_once": 1
   },
   {
@@ -737,8 +661,8 @@
   {
    "fieldname": "organization_tab",
    "fieldtype": "Tab Break",
-   "label": "Others",
    "hidden": 1,
+   "label": "Others",
    "read_only": 1
   },
   {
@@ -748,20 +672,20 @@
   {
    "fieldname": "organization",
    "fieldtype": "Data",
-   "label": "Organization",
-   "hidden": 1
+   "hidden": 1,
+   "label": "Organization"
   },
   {
    "fieldname": "annual_revenue_note",
    "fieldtype": "Data",
-   "label": "Annual Revenue Note",
-   "hidden": 1
+   "hidden": 1,
+   "label": "Annual Revenue Note"
   },
   {
    "fieldname": "annual_revenue",
    "fieldtype": "Currency",
-   "label": "Annual Revenue",
-   "hidden": 1
+   "hidden": 1,
+   "label": "Annual Revenue"
   },
   {
    "fieldname": "column_break_org1",
@@ -770,14 +694,14 @@
   {
    "fieldname": "products_tab",
    "fieldtype": "Tab Break",
-   "label": "Products",
-   "hidden": 1
+   "hidden": 1,
+   "label": "Products"
   },
   {
    "fieldname": "products",
    "fieldtype": "Table",
-   "label": "Products",
    "hidden": 1,
+   "label": "Products",
    "options": "CRM Products"
   },
   {
@@ -788,8 +712,8 @@
   {
    "fieldname": "total",
    "fieldtype": "Currency",
-   "label": "Total",
    "hidden": 1,
+   "label": "Total",
    "options": "currency",
    "read_only": 1
   },
@@ -799,13 +723,70 @@
    "hidden": 1
   },
   {
+   "description": "Total after discount",
    "fieldname": "net_total",
    "fieldtype": "Currency",
-   "label": "Net Total",
    "hidden": 1,
+   "label": "Net Total",
    "options": "currency",
-   "read_only": 1,
-   "description": "Total after discount"
+   "read_only": 1
   }
- ]
+ ],
+ "grid_page_length": 50,
+ "image_field": "image",
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-03-30 13:08:56.670936",
+ "modified_by": "Administrator",
+ "module": "FCRM",
+ "name": "CRM Lead",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Sales Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Sales User",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sender_field": "email",
+ "sender_name_field": "first_name",
+ "show_title_field_in_link": 1,
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "lead_name",
+ "track_changes": 1
 }
