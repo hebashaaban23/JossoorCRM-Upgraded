@@ -777,7 +777,7 @@ const dropdownOptions = computed(() => [
 ])
 
 // ── Resources ──────────────────────────────────────────────────────────────────
-dashboard.get_leads_dashboard
+///testttttt
 const dashboardItems = createResource({
   url: 'crm.api.dashboard.get_dashboard',
   makeParams() { return { from_date: fromDate.value, to_date: toDate.value, user: filters.user } },
