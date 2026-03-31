@@ -32,19 +32,38 @@
         <template #prefix><LucideCalendar class="size-4 text-ink-gray-5 mr-2" /></template>
       </DateRangePicker>
 
+      
       <Link
         v-if="isAdmin() || isManager()"
-        class="form-control w-48" variant="outline"
+        class="form-control w-48"
+        variant="outline"
         :value="filters.user && getUser(filters.user).full_name"
         doctype="User"
-        :filters="{ name: ['in', users.data.crmUsers?.map((u) => u.name)] }"
+        :filters="{
+          name: ['in', users.data.crmUsers?.map((u) => u.name)],
+          ignore_user_type: 1,
+        }"
+        :placeholder="__('Sales User')"
+        :hideMe="true"
         @change="(v) => updateFilter('user', v)"
-        :placeholder="__('All Sales Users')" :hideMe="true"
       >
-        <template #prefix><UserAvatar v-if="filters.user" class="mr-2" :user="filters.user" size="sm" /></template>
-        <template #item-prefix="{ option }"><UserAvatar class="mr-2" :user="option.value" size="sm" /></template>
+        <template #prefix>
+          <UserAvatar
+            v-if="filters.user"
+            class="mr-2"
+            :user="filters.user"
+            size="sm"
+          />
+        </template>
+        <template #item-prefix="{ option }">
+          <UserAvatar class="mr-2" :user="option.value" size="sm" />
+        </template>
         <template #item-label="{ option }">
-          <Tooltip :text="option.value"><div class="cursor-pointer">{{ getUser(option.value).full_name }}</div></Tooltip>
+          <Tooltip :text="option.value">
+            <div class="cursor-pointer">
+              {{ getUser(option.value).full_name }}
+            </div>
+          </Tooltip>
         </template>
       </Link>
     </div>
@@ -758,7 +777,7 @@ const dropdownOptions = computed(() => [
 ])
 
 // ── Resources ──────────────────────────────────────────────────────────────────
-
+dashboard.get_leads_dashboard
 const dashboardItems = createResource({
   url: 'crm.api.dashboard.get_dashboard',
   makeParams() { return { from_date: fromDate.value, to_date: toDate.value, user: filters.user } },
@@ -766,7 +785,7 @@ const dashboardItems = createResource({
 })
 
 const leadsData = createResource({
-  url: 'crm.api.dashboard.get_leads_dashboard',
+  url: 'crm.api.dashboard.get_dashboard',
   makeParams() {
     return { from_date: fromDate.value, to_date: toDate.value, user: filters.user, project: filters.project, status: filters.status, search: filters.searchText }
   },

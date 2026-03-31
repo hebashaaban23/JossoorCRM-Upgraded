@@ -655,32 +655,48 @@ def _get_lead_status_funnel(fd, td, user, user_cond, user_params, project=None, 
 
 def _get_lead_activity_counts(fd, td, user, project=None, status_filter=None, search=None):
     params = {}
-    lead_parts = []
+    lead_conds = []
     if user:
         u_cond, u_params = _get_user_condition(user)
-        lead_parts.append(u_cond.lstrip("AND ").strip())
+        stripped = u_cond.lstrip("AND ").strip()
+        if stripped:
+            lead_conds.append(stripped.replace("l.lead_owner", "l.lead_owner"))  # keep alias
         params.update(u_params)
     if project:
-        lead_parts.append("l.project=%(project)s"); params["project"] = project
+        lead_conds.append("l.project=%(project)s"); params["project"] = project
     if status_filter:
-        lead_parts.append("l.status=%(status_filter)s"); params["status_filter"] = status_filter
+        lead_conds.append("l.status=%(status_filter)s"); params["status_filter"] = status_filter
     if search:
-        lead_parts.append("(l.first_name LIKE %(search)s OR l.last_name LIKE %(search)s OR l.mobile_no LIKE %(search)s)"); params["search"] = f"%{search}%"
-    lead_where = ("WHERE " + " AND ".join(lead_parts)) if lead_parts else ""
+        lead_conds.append("(l.first_name LIKE %(search)s OR l.last_name LIKE %(search)s OR l.mobile_no LIKE %(search)s)")
+        params["search"] = f"%{search}%"
+
     if fd and td:
         params.update(fd=fd, td=td)
 
     def cnt(table, date_col, ref_col="reference_name", extra=""):
-        date_cond = f"DATE(t.{date_col}) BETWEEN %(fd)s AND %(td)s" if fd and td else ""
-        extra_cond = f"AND {extra}" if extra else ""
-        if lead_where:
-            wh = f"WHERE {date_cond} {extra_cond}" if date_cond else (f"WHERE {extra}" if extra else "")
-            q = f"SELECT COUNT(*) AS c FROM `{table}` t JOIN `tabCRM Lead` l ON t.{ref_col}=l.name {wh} {lead_where.replace('WHERE','AND')}"
-        else:
-            wh = f"WHERE {date_cond} {extra_cond}" if (date_cond or extra) else ""
+        all_conds = []
+        if fd and td:
+            all_conds.append(f"DATE(t.{date_col}) BETWEEN %(fd)s AND %(td)s")
+        if extra:
+            all_conds.append(extra)
+        
+        if ref_col == "name":
+            # querying tabCRM Lead itself — no join needed, rewrite lead_conds with t. alias
+            t_conds = [c.replace("l.", "t.") for c in lead_conds]
+            all_conds.extend(t_conds)
+            wh = ("WHERE " + " AND ".join(all_conds)) if all_conds else ""
             q = f"SELECT COUNT(*) AS c FROM `{table}` t {wh}"
-        r = frappe.db.sql(q, params, as_dict=True)
-        return r[0].c if r else 0
+        else:
+            # joining tabCRM Lead
+            join_conds = list(lead_conds)  # already use l. alias
+            wh = ("WHERE " + " AND ".join(all_conds + join_conds)) if (all_conds or join_conds) else ""
+            q = f"SELECT COUNT(*) AS c FROM `{table}` t JOIN `tabCRM Lead` l ON t.{ref_col}=l.name {wh}"
+        
+        try:
+            r = frappe.db.sql(q, params, as_dict=True)
+            return r[0].c if r else 0
+        except Exception:
+            return 0
 
     return {
         "calls":    cnt("tabCRM Call Log", "creation"),
@@ -694,7 +710,6 @@ def _get_lead_activity_counts(fd, td, user, project=None, status_filter=None, se
         "deals":    cnt("tabCRM Deal", "creation", ref_col="name"),
         "others":   cnt("tabCRM Lead", "creation", ref_col="name", extra="t.source NOT IN ('Website','WhatsApp','Email','Direct')"),
     }
-
 
 def _get_lead_conversion_metrics(fd, td, user, user_cond, user_params, project=None, status_filter=None, search=None):
     if not fd or not td:
