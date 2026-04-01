@@ -364,3 +364,20 @@ standard_dropdown_items = [
 		"is_standard": 1,
 	},
 ]
+
+fixtures = [
+    {"dt": "DocType", "filters": [
+        [
+            "name", "in", [
+                "CRM Lead Status"
+            ]
+        ]
+    ]},
+#    {"dt": "Custom Field", "filters": [
+#        [
+#            "name", "in", [
+#                "CustomFieldName"
+#            ]
+#        ]
+#    ]}
+]
