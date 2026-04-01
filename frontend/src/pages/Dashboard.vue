@@ -32,7 +32,6 @@
         <template #prefix><LucideCalendar class="size-4 text-ink-gray-5 mr-2" /></template>
       </DateRangePicker>
 
-      
       <Link
         v-if="isAdmin() || isManager()"
         class="form-control w-48"
@@ -127,7 +126,6 @@
                   <div class="size-8 rounded-lg bg-emerald-600 flex items-center justify-center"><LucideTrendingUp class="size-4 text-white" /></div>
                   <span class="text-xs font-semibold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">Rate</span>
                 </div>
-                <!-- FIX: conversionRate is Number, uses monthly_target.won_deals -->
                 <p class="text-3xl font-black text-emerald-900">{{ conversionRate }}%</p>
                 <p class="text-xs font-semibold text-emerald-700 uppercase tracking-wide mt-1">Conversion Rate</p>
               </div>
@@ -151,7 +149,7 @@
 
             <!-- Status Funnel + Donut row -->
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <!-- Status funnel — uses real CRM Lead Statuses from DB -->
+              <!-- Status funnel -->
               <div class="bg-white rounded-2xl border border-gray-200 p-6">
                 <h3 class="text-sm font-bold text-gray-900 mb-4">Lead Status Funnel</h3>
                 <div v-if="leadsData.data.status_funnel?.length" class="space-y-2">
@@ -180,7 +178,6 @@
                   <div class="relative size-36 shrink-0" v-if="donutHasData">
                     <svg viewBox="0 0 120 120" class="w-full h-full -rotate-90">
                       <circle cx="60" cy="60" r="46" fill="none" stroke="#f3f4f6" stroke-width="20" />
-                      <!-- FIX: correct clockwise offset, colour fallback by index -->
                       <circle v-for="seg in donutSegments" :key="seg.status"
                         cx="60" cy="60" r="46" fill="none"
                         :stroke="seg.color" stroke-width="20"
@@ -250,16 +247,15 @@
 
             <!-- Lost Reasons + Sources -->
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <!-- Lost Reasons — FIX: real DB data, no Math.random() -->
+              <!-- Lost Reasons -->
               <div class="bg-white rounded-2xl border border-gray-200 p-6">
                 <div class="flex items-center justify-between mb-5 pb-4 border-b border-gray-100">
                   <h3 class="text-sm font-bold text-gray-900 flex items-center gap-2">
                     <LucideXCircle class="size-4 text-red-500" /> Lost Reasons
                   </h3>
-                  <!-- FIX: conversionRate is Number so subtraction is arithmetic -->
                   <div class="flex gap-3 text-xs text-gray-400">
                     <span class="flex items-center gap-1"><span class="size-2 bg-emerald-400 rounded-full"></span>{{ conversionRate }}% won</span>
-                    <span class="flex items-center gap-1"><span class="size-2 bg-red-400 rounded-full"></span>{{ (100 - conversionRate).toFixed(1) }}% lost</span>
+                    <span class="flex items-center gap-1"><span class="size-2 bg-red-400 rounded-full"></span>{{ lostPct }}% lost</span>
                   </div>
                 </div>
                 <div v-if="lostReasonChartData.length" class="flex items-end gap-3 h-52">
@@ -274,11 +270,11 @@
                 <div v-else class="py-10 text-center text-sm text-gray-400 bg-gray-50 rounded-xl">No lost reasons recorded</div>
               </div>
 
-              <!-- Source Performance — FIX: reads .total & .won, dynamic scale -->
+              <!-- Source Performance -->
               <div class="bg-white rounded-2xl border border-gray-200 p-6">
                 <div class="flex items-center justify-between mb-5 pb-4 border-b border-gray-100">
                   <h3 class="text-sm font-bold text-gray-900 flex items-center gap-2">
-                    <LucideBarChartHero class="size-4 text-blue-500" /> Source Performance
+                    <LucideBarChart2 class="size-4 text-blue-500" /> Source Performance
                   </h3>
                   <div class="flex gap-3 text-xs text-gray-400">
                     <span class="flex items-center gap-1"><span class="size-2 bg-blue-500 rounded-full"></span>Total</span>
@@ -448,7 +444,7 @@
                 </div>
               </div>
 
-              <!-- Reservations — FIX: unit="count", no fake K suffix -->
+              <!-- Reservations -->
               <div class="bg-white rounded-2xl border border-gray-200 p-6">
                 <div class="flex items-center justify-between mb-5">
                   <h3 class="text-sm font-bold text-gray-900">Reservation Status</h3>
@@ -457,7 +453,6 @@
                 <div class="flex items-end justify-between gap-4 h-48">
                   <div v-for="(item, idx) in inventoryReservationsData" :key="idx"
                     class="flex-1 flex flex-col items-center justify-end h-full group">
-                    <!-- FIX: display raw count, not "3K" -->
                     <span class="text-sm font-bold mb-2 group-hover:-translate-y-1 transition-transform" :style="{ color: item.color }">{{ item.value || 0 }}</span>
                     <div class="w-full rounded-t-xl shadow-sm transition-all duration-1000 origin-bottom"
                       :style="{ height: reservationBarHeight(item.value) + '%', background: item.color }"></div>
@@ -470,7 +465,7 @@
         </section>
 
         <!-- ══════════════════════════════════════════════════════
-             SECTION 3: TASKS PERFORMANCE (NEW)
+             SECTION 3: TASKS PERFORMANCE
         ══════════════════════════════════════════════════════ -->
         <section class="border-t border-gray-100 pt-8 pb-8">
           <div class="flex items-center gap-3 mb-5">
@@ -565,7 +560,7 @@
               <!-- Priority breakdown -->
               <div class="bg-white rounded-2xl border border-gray-200 p-6">
                 <h3 class="text-sm font-bold text-gray-900 mb-4">By Priority</h3>
-                <div class="space-y-3 mb-4">
+                <div class="space-y-3">
                   <div v-for="item in tasksData.data?.priority_breakdown || []" :key="item.priority"
                     class="flex items-center gap-3">
                     <span class="size-2.5 rounded-full shrink-0" :style="{ background: item.color }"></span>
@@ -663,21 +658,21 @@ import ViewBreadcrumbs from '@/components/ViewBreadcrumbs.vue'
 import LayoutHeader from '@/components/LayoutHeader.vue'
 import Link from '@/components/Controls/Link.vue'
 
-import LucideRefreshCcw   from '~icons/lucide/refresh-ccw'
-import LucideUndo2        from '~icons/lucide/undo-2'
-import LucidePenLine      from '~icons/lucide/pen-line'
-import LucideCalendar     from '~icons/lucide/calendar'
-import LucideUsers        from '~icons/lucide/users'
-import LucideActivity     from '~icons/lucide/activity'
-import LucideClock        from '~icons/lucide/clock'
-import LucideTrendingUp   from '~icons/lucide/trending-up'
-import LucideTarget       from '~icons/lucide/target'
-import LucideXCircle      from '~icons/lucide/x-circle'
-import LucideGlobe        from '~icons/lucide/globe'
-import LucideSearch       from '~icons/lucide/search'
-import LucideArrowRight   from '~icons/lucide/arrow-right'
-import LucideBarChartHero from '~icons/lucide/bar-chart-2'
-import LucidePhone        from '~icons/lucide/phone'
+import LucideRefreshCcw     from '~icons/lucide/refresh-ccw'
+import LucideUndo2          from '~icons/lucide/undo-2'
+import LucidePenLine        from '~icons/lucide/pen-line'
+import LucideCalendar       from '~icons/lucide/calendar'
+import LucideUsers          from '~icons/lucide/users'
+import LucideActivity       from '~icons/lucide/activity'
+import LucideClock          from '~icons/lucide/clock'
+import LucideTrendingUp     from '~icons/lucide/trending-up'
+import LucideTarget         from '~icons/lucide/target'
+import LucideXCircle        from '~icons/lucide/x-circle'
+import LucideSearch         from '~icons/lucide/search'
+import LucideArrowRight     from '~icons/lucide/arrow-right'
+// FIX: was aliased as LucideBarChartHero but that component name doesn't exist
+import LucideBarChart2      from '~icons/lucide/bar-chart-2'
+import LucidePhone          from '~icons/lucide/phone'
 import LucidePhoneForwarded from '~icons/lucide/phone-forwarded'
 import LucideMessageSquare  from '~icons/lucide/message-square'
 import LucideMessageCircle  from '~icons/lucide/message-circle'
@@ -690,11 +685,9 @@ import LucideCheckCircle    from '~icons/lucide/check-circle'
 import LucideAlertCircle    from '~icons/lucide/alert-circle'
 import LucideLayoutGrid     from '~icons/lucide/layout-grid'
 import LucideThumbsDown     from '~icons/lucide/thumbs-down'
-import LucideBriefcase      from '~icons/lucide/briefcase'
 import LucideBuilding2      from '~icons/lucide/building-2'
 import LucideHome           from '~icons/lucide/home'
 import LucideLightbulb      from '~icons/lucide/lightbulb'
-import LucideChevronDown    from '~icons/lucide/chevron-down'
 
 import { usersStore } from '@/stores/users'
 import { copy } from '@/utils'
@@ -743,9 +736,8 @@ function debouncedLeadSearch() {
 }
 onUnmounted(() => { if (searchTimeout) clearTimeout(searchTimeout) })
 
-function updateFilter(key: FilterKey, value: any, callback?: () => void) {
+function updateFilter(key: FilterKey, value: any) {
   filters[key] = value
-  callback?.()
   reloadAll()
 }
 
@@ -777,17 +769,25 @@ const dropdownOptions = computed(() => [
 ])
 
 // ── Resources ──────────────────────────────────────────────────────────────────
-///testttttt
+
 const dashboardItems = createResource({
   url: 'crm.api.dashboard.get_dashboard',
   makeParams() { return { from_date: fromDate.value, to_date: toDate.value, user: filters.user } },
   auto: true,
 })
 
+// FIX: was incorrectly pointing to get_dashboard; must use get_leads_dashboard
 const leadsData = createResource({
-  url: 'crm.api.dashboard.get_dashboard',
+  url: 'crm.api.dashboard.get_leads_dashboard',
   makeParams() {
-    return { from_date: fromDate.value, to_date: toDate.value, user: filters.user, project: filters.project, status: filters.status, search: filters.searchText }
+    return {
+      from_date: fromDate.value,
+      to_date: toDate.value,
+      user: filters.user,
+      project: filters.project,
+      status: filters.status,
+      search: filters.searchText,
+    }
   },
   auto: true,
 })
@@ -833,7 +833,7 @@ function resetToDefault() {
 
 // ── Leads computed ─────────────────────────────────────────────────────────────
 
-// FIX: returns Number; uses monthly_target.won_deals (not stats.items search)
+// Returns a Number; based on monthly_target.won_deals / stats.total
 const conversionRate = computed<number>(() => {
   const stats = leadsData.data?.stats
   if (!stats || stats.total === 0) return 0
@@ -841,12 +841,14 @@ const conversionRate = computed<number>(() => {
   return parseFloat(((won / stats.total) * 100).toFixed(1))
 })
 
+// FIX: arithmetic subtraction works because conversionRate is Number
+const lostPct = computed<string>(() => (100 - conversionRate.value).toFixed(1))
+
 const FALLBACK_COLOURS = ['#60a5fa','#34d399','#f472b6','#a78bfa','#fb923c','#38bdf8','#4ade80','#e879f9','#facc15','#94a3b8']
 const CIRCUMFERENCE = 2 * Math.PI * 46
 
 const donutHasData = computed(() => (leadsData.data?.stats?.total ?? 0) > 0)
 
-// FIX: correct clockwise offset; colour fallback by index
 const donutSegments = computed(() => {
   const stats = leadsData.data?.stats
   if (!stats || stats.total === 0) return []
@@ -861,22 +863,14 @@ const donutSegments = computed(() => {
   })
 })
 
-// FIX: activity keys aligned to API fields (viewings + bookings added)
 const activityItems = [
   { key: 'feedback', label: 'Feedback', icon: LucideMessageSquare, color: '#A855F7', bg: '#F3E8FF' },
-  //{ key: 'calls',    label: 'Calls',    icon: LucidePhone,          color: '#6B7280', bg: '#F3F4F6' },
-  //{ key: 'email',    label: 'Email',    icon: LucideMail,           color: '#F59E0B', bg: '#FEF3C7' },
-  { key: 'whatsapp', label: 'WhatsApp', icon: LucideMessageCircle,  color: '#10B981', bg: '#D1FAE5' },
-  //{ key: 'meetings', label: 'Meetings', icon: LucideCalendarCheck,  color: '#06B6D4', bg: '#CFFAFE' },
-  //{ key: 'viewings', label: 'Viewings', icon: LucideEye,            color: '#f43f5e', bg: '#fff1f2' },
-  //{ key: 'bookings', label: 'Bookings', icon: LucideBookmark,       color: '#0891b2', bg: '#ecfeff' },
-  //{ key: 'website',  label: 'Website',  icon: LucideGlobe,          color: '#3B82F6', bg: '#DBEAFE' },
+  { key: 'whatsapp', label: 'WhatsApp', icon: LucideMessageCircle, color: '#10B981', bg: '#D1FAE5' },
 ]
 
 const leadOverviewCards = computed(() => {
   const stats = leadsData.data?.stats?.items || []
   const getCount = (s: string) => stats.find((i: any) => i.status === s)?.count ?? 0
-  // Real statuses from CRM Lead Status screenshot: New, Contacted, Nurture, Qualified, Unqualified, Junk, Meeting, Follow Up To Meeting
   return [
     { status: 'New',                  db_status: 'New',                  icon: LucideTarget,         color: '#10b981', bg: '#ecfdf5', count: getCount('New') },
     { status: 'Contacted',            db_status: 'Contacted',            icon: LucidePhoneForwarded, color: '#6366f1', bg: '#eef2ff', count: getCount('Contacted') },
@@ -886,11 +880,10 @@ const leadOverviewCards = computed(() => {
     { status: 'Junk',                 db_status: 'Junk',                 icon: LucideXCircle,        color: '#ef4444', bg: '#fef2f2', count: getCount('Junk') },
     { status: 'Meeting',              db_status: 'Meeting',              icon: LucideCalendarCheck,  color: '#ec4899', bg: '#fdf2f8', count: getCount('Meeting') },
     { status: 'Follow Up To Meeting', db_status: 'Follow Up To Meeting', icon: LucideClock,          color: '#f59e0b', bg: '#fffbeb', count: getCount('Follow Up To Meeting') },
-    { status: 'Reserved',              db_status: 'Reserved',              icon: LucideBookmark,       color: '#0891b2', bg: '#ecfeff', count: getCount('Reserved') } 
-   ]
+    { status: 'Reserved',             db_status: 'Reserved',             icon: LucideBookmark,       color: '#0891b2', bg: '#ecfeff', count: getCount('Reserved') },
+  ]
 })
 
-// FIX: lost reasons use real DB data — NO Math.random()
 const LOST_COLOURS = ['#93c5fd','#6ee7b7','#1f2937','#60a5fa','#a78bfa','#fb923c','#f472b6','#38bdf8','#4ade80','#facc15']
 
 const lostReasonChartData = computed(() => {
@@ -901,12 +894,10 @@ const lostReasonChartData = computed(() => {
     reason:    r.reason,
     count:     r.count ?? 0,
     color:     LOST_COLOURS[i % LOST_COLOURS.length],
-    // FIX: data-relative height, no magic constants
     heightPct: Math.min(Math.max(((r.count ?? 0) / maxCount) * 85, (r.count ?? 0) > 0 ? 12 : 4), 85),
   }))
 })
 
-// FIX: reads .total and .won (correct API field names), data-relative scale
 const leadSourcesChartData = computed(() => {
   const sources: any[] = leadsData.data?.source_chart || []
   if (!sources.length) return []
@@ -936,11 +927,10 @@ const inventoryReservationsData = computed(() => inventoryData.data?.reservation
   { type: 'Cancelled', value: 0, color: '#ef4444' },
 ])
 
-// FIX: profits use data-relative bar heights (K values), reservations use count-relative
 const profitMax = computed(() => Math.max(...inventoryProfitsData.value.map((d: any) => d.value || 0), 1))
 const reservMax = computed(() => Math.max(...inventoryReservationsData.value.map((d: any) => d.value || 0), 1))
 
-const profitBarHeight     = (v: number) => v > 0 ? Math.max((v / profitMax.value) * 80, 8) : 4
+const profitBarHeight      = (v: number) => v > 0 ? Math.max((v / profitMax.value) * 80, 8) : 4
 const reservationBarHeight = (v: number) => v > 0 ? Math.max((v / reservMax.value) * 80, 8) : 4
 
 // ── Utilities ──────────────────────────────────────────────────────────────────

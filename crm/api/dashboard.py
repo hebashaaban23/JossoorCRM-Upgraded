@@ -166,7 +166,7 @@ def get_dashboard(from_date="", to_date="", user="", project=""):
     return layout
 
 
-# ─── Scalar helpers (kept lean — parameterised throughout) ───────────────────
+# ─── Scalar helpers ───────────────────────────────────────────────────────────
 
 def _diff(fd, td):
     return max(frappe.utils.date_diff(td, fd), 1)
@@ -616,7 +616,6 @@ def get_leads_dashboard(from_date="", to_date="", user="", project=None, status=
         "lost_reasons":   _get_lead_lost_reasons(from_date, to_date, user, user_cond, user_params, project, status, search),
         "source_chart":   _get_lead_source_performance(from_date, to_date, user, user_cond, user_params, project, status, search),
         "monthly_target": _get_monthly_target(user),
-        # NEW: status funnel ordered by your real CRM Lead Status positions
         "status_funnel":  _get_lead_status_funnel(from_date, to_date, user, user_cond, user_params, project, status, search),
     }
 
@@ -635,11 +634,6 @@ def _get_lead_status_stats(fd, td, user, user_cond, user_params, project=None, s
 
 
 def _get_lead_status_funnel(fd, td, user, user_cond, user_params, project=None, status_filter=None, search=None):
-    """
-    Returns status counts in pipeline order using actual CRM Lead Status positions.
-    Real statuses from screenshot: New(1) → Contacted(2) → Nurture(3) → Qualified(4)
-    → Unqualified(5) → Junk(6) → Meeting(5) → Follow Up To Meeting(8)
-    """
     where, params = _build_lead_where(fd, td, user_cond, user_params, alias="l", project=project, status=status_filter, search=search)
     rows = frappe.db.sql(f"""
         SELECT l.status, COUNT(*) AS count, s.color, COALESCE(s.position,99) AS pos
@@ -654,62 +648,104 @@ def _get_lead_status_funnel(fd, td, user, user_cond, user_params, project=None, 
 
 
 def _get_lead_activity_counts(fd, td, user, project=None, status_filter=None, search=None):
-    params = {}
-    lead_conds = []
+    """
+    Count activities linked to CRM Leads.
+    - tabCRM Call Log: joined via reference_name = lead name
+    - tabComment: joined via reference_doctype='CRM Lead' AND reference_name = lead name
+    - tabCommunication: joined via reference_doctype='CRM Lead' AND reference_name = lead name
+    - tabCRM Lead itself: direct count with extra filters
+    """
+    # Build lead-level filters (used in subquery to find matching lead names)
+    lead_conds, lead_params = [], {}
+
     if user:
         u_cond, u_params = _get_user_condition(user)
         stripped = u_cond.lstrip("AND ").strip()
+        # Replace alias "l." with "lead." for the subquery
         if stripped:
-            lead_conds.append(stripped.replace("l.lead_owner", "l.lead_owner"))  # keep alias
-        params.update(u_params)
+            lead_conds.append(stripped.replace("l.lead_owner", "lead.lead_owner"))
+        lead_params.update(u_params)
+
     if project:
-        lead_conds.append("l.project=%(project)s"); params["project"] = project
+        lead_conds.append("lead.project = %(project)s")
+        lead_params["project"] = project
+
     if status_filter:
-        lead_conds.append("l.status=%(status_filter)s"); params["status_filter"] = status_filter
+        lead_conds.append("lead.status = %(status_filter)s")
+        lead_params["status_filter"] = status_filter
+
     if search:
-        lead_conds.append("(l.first_name LIKE %(search)s OR l.last_name LIKE %(search)s OR l.mobile_no LIKE %(search)s)")
-        params["search"] = f"%{search}%"
+        lead_conds.append(
+            "(lead.first_name LIKE %(search)s OR lead.last_name LIKE %(search)s OR lead.mobile_no LIKE %(search)s)"
+        )
+        lead_params["search"] = f"%{search}%"
 
     if fd and td:
-        params.update(fd=fd, td=td)
+        lead_params.update(fd=fd, td=td)
 
-    def cnt(table, date_col, ref_col="reference_name", extra=""):
-        all_conds = []
+    # Subquery that returns matching lead names
+    lead_where_parts = list(lead_conds)
+    if fd and td:
+        lead_where_parts.append("DATE(lead.creation) BETWEEN %(fd)s AND %(td)s")
+    lead_subquery_where = ("WHERE " + " AND ".join(lead_where_parts)) if lead_where_parts else ""
+    lead_subquery = f"SELECT lead.name FROM `tabCRM Lead` lead {lead_subquery_where}"
+
+    def cnt(table, date_col, extra_cond="", ref_doctype_cond=""):
+        """
+        Count rows in `table` t where:
+        - date range applies to t.{date_col}
+        - t.reference_name IN (matching lead names subquery)
+        - optional extra_cond (e.g. communication_medium filter)
+        """
+        parts = [f"t.reference_name IN ({lead_subquery})"]
+        if ref_doctype_cond:
+            parts.append(ref_doctype_cond)
         if fd and td:
-            all_conds.append(f"DATE(t.{date_col}) BETWEEN %(fd)s AND %(td)s")
-        if extra:
-            all_conds.append(extra)
-        
-        if ref_col == "name":
-            # querying tabCRM Lead itself — no join needed, rewrite lead_conds with t. alias
-            t_conds = [c.replace("l.", "t.") for c in lead_conds]
-            all_conds.extend(t_conds)
-            wh = ("WHERE " + " AND ".join(all_conds)) if all_conds else ""
-            q = f"SELECT COUNT(*) AS c FROM `{table}` t {wh}"
-        else:
-            # joining tabCRM Lead
-            join_conds = list(lead_conds)  # already use l. alias
-            wh = ("WHERE " + " AND ".join(all_conds + join_conds)) if (all_conds or join_conds) else ""
-            q = f"SELECT COUNT(*) AS c FROM `{table}` t JOIN `tabCRM Lead` l ON t.{ref_col}=l.name {wh}"
-        
+            parts.append(f"DATE(t.{date_col}) BETWEEN %(fd)s AND %(td)s")
+        if extra_cond:
+            parts.append(extra_cond)
+        where = "WHERE " + " AND ".join(parts)
         try:
-            r = frappe.db.sql(q, params, as_dict=True)
+            r = frappe.db.sql(f"SELECT COUNT(*) AS c FROM `{table}` t {where}", lead_params, as_dict=True)
+            return r[0].c if r else 0
+        except Exception:
+            return 0
+
+    def cnt_direct(extra_cond=""):
+        """Count rows directly on tabCRM Lead matching the subquery + extra filter."""
+        parts = [f"name IN ({lead_subquery})"]
+        if fd and td:
+            parts.append("DATE(creation) BETWEEN %(fd)s AND %(td)s")
+        if extra_cond:
+            parts.append(extra_cond)
+        where = "WHERE " + " AND ".join(parts)
+        try:
+            r = frappe.db.sql(f"SELECT COUNT(*) AS c FROM `tabCRM Lead` {where}", lead_params, as_dict=True)
             return r[0].c if r else 0
         except Exception:
             return 0
 
     return {
-        "calls":    cnt("tabCRM Call Log", "creation"),
-        "feedback": cnt("tabComment", "creation", extra="t.comment_type='Comment'"),
-        "whatsapp": cnt("tabCommunication", "creation", extra="t.communication_medium='WhatsApp'"),
-        "email":    cnt("tabCommunication", "creation", extra="t.communication_medium='Email'"),
-        "meetings": cnt("tabComment", "creation", extra="t.comment_type='Meeting'"),
-        "viewings": cnt("tabComment", "creation", extra="t.comment_type='Viewing'"),
-        "bookings": cnt("tabComment", "creation", extra="t.comment_type='Booking'"),
-        "website":  cnt("tabCRM Lead", "creation", ref_col="name", extra="t.source='Website'"),
-        "deals":    cnt("tabCRM Deal", "creation", ref_col="name"),
-        "others":   cnt("tabCRM Lead", "creation", ref_col="name", extra="t.source NOT IN ('Website','WhatsApp','Email','Direct')"),
+        # BUG FIX: tabComment needs reference_doctype filter to avoid cross-doctype collisions
+        "feedback": cnt("tabComment",       "creation", "t.comment_type='Comment'",  "t.reference_doctype='CRM Lead'"),
+        "whatsapp": cnt("tabCommunication", "creation", "t.communication_medium='WhatsApp'", "t.reference_doctype='CRM Lead'"),
+        "email":    cnt("tabCommunication", "creation", "t.communication_medium='Email'",    "t.reference_doctype='CRM Lead'"),
+        "meetings": cnt("tabComment",       "creation", "t.comment_type='Meeting'",   "t.reference_doctype='CRM Lead'"),
+        "viewings": cnt("tabComment",       "creation", "t.comment_type='Viewing'",   "t.reference_doctype='CRM Lead'"),
+        "bookings": cnt("tabComment",       "creation", "t.comment_type='Booking'",   "t.reference_doctype='CRM Lead'"),
+        # tabCRM Call Log uses reference_name but no reference_doctype column — filter by lead subquery only
+        "calls":    cnt("tabCRM Call Log",  "creation"),
+        # Direct lead counts
+        "website":  cnt_direct("source='Website'"),
+        "others":   cnt_direct("source NOT IN ('Website','WhatsApp','Email','Direct')"),
+        # Deals linked to matching leads
+        "deals":    frappe.db.sql(
+            f"SELECT COUNT(*) AS c FROM `tabCRM Deal` WHERE lead IN ({lead_subquery})"
+            + (" AND DATE(creation) BETWEEN %(fd)s AND %(td)s" if fd and td else ""),
+            lead_params, as_dict=True
+        )[0].c or 0,
     }
+
 
 def _get_lead_conversion_metrics(fd, td, user, user_cond, user_params, project=None, status_filter=None, search=None):
     if not fd or not td:
@@ -740,7 +776,6 @@ def _get_lead_conversion_metrics(fd, td, user, user_cond, user_params, project=N
 
 
 def _get_lead_lost_reasons(fd, td, user, user_cond, user_params, project=None, status_filter=None, search=None):
-    """FIX: returns real DB data only. No Math.random() fallback."""
     if not frappe.db.has_column("CRM Lead", "lost_reason"):
         return []
     where, params = _build_lead_where(fd, td, user_cond, user_params, alias="l", project=project, status=status_filter, search=search)
@@ -912,19 +947,12 @@ def _get_inventory_reservations(pf=None):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# SECTION 3: Tasks Performance Dashboard (NEW)
-# Uses CRM Task doctype — fields: task_type, status, priority, assigned_to,
-# due_date, start_date, lead, project, unit
+# SECTION 3: Tasks Performance Dashboard
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @frappe.whitelist()
 @sales_user_only
 def get_tasks_dashboard(from_date="", to_date="", user="", project=None):
-    """
-    Consolidated API for the Tasks Performance section.
-    Returns: kpis, status_breakdown, type_breakdown, priority_breakdown,
-             completion_by_user, overdue_trend, task_type_performance
-    """
     roles = frappe.get_roles(frappe.session.user)
     is_sales_user = "Sales User" in roles and "Sales Manager" not in roles and "System Manager" not in roles
     if is_sales_user and not user:
@@ -933,18 +961,17 @@ def get_tasks_dashboard(from_date="", to_date="", user="", project=None):
     project = project.strip() if project and project.strip() else None
 
     return {
-        "kpis":                  _get_task_kpis(from_date, to_date, user, project),
-        "status_breakdown":      _get_task_status_breakdown(from_date, to_date, user, project),
-        "type_breakdown":        _get_task_type_breakdown(from_date, to_date, user, project),
-        "priority_breakdown":    _get_task_priority_breakdown(from_date, to_date, user, project),
-        "completion_by_user":    _get_task_completion_by_user(from_date, to_date, project),
-        "overdue_trend":         _get_task_overdue_trend(from_date, to_date, user, project),
-        "type_performance":      _get_task_type_performance(from_date, to_date, user, project),
+        "kpis":               _get_task_kpis(from_date, to_date, user, project),
+        "status_breakdown":   _get_task_status_breakdown(from_date, to_date, user, project),
+        "type_breakdown":     _get_task_type_breakdown(from_date, to_date, user, project),
+        "priority_breakdown": _get_task_priority_breakdown(from_date, to_date, user, project),
+        "completion_by_user": _get_task_completion_by_user(from_date, to_date, project),
+        "overdue_trend":      _get_task_overdue_trend(from_date, to_date, user, project),
+        "type_performance":   _get_task_type_performance(from_date, to_date, user, project),
     }
 
 
 def _task_base_where(fd, td, user=None, project=None, extra_conds=None):
-    """Build WHERE clause for CRM Task queries."""
     parts, params = [], {}
     if fd and td:
         parts.append("DATE(t.creation) BETWEEN %(from_date)s AND %(to_date)s")
@@ -962,9 +989,7 @@ def _task_base_where(fd, td, user=None, project=None, extra_conds=None):
 
 
 def _get_task_kpis(fd, td, user=None, project=None):
-    """4 KPI cards: Total, Done, Late, Completion rate."""
     where, params = _task_base_where(fd, td, user, project)
-
     r = frappe.db.sql(f"""
         SELECT
             COUNT(*) AS total,
@@ -974,12 +999,9 @@ def _get_task_kpis(fd, td, user=None, project=None):
             SUM(CASE WHEN t.status='Todo' THEN 1 ELSE 0 END) AS todo,
             SUM(CASE WHEN t.status='Canceled' THEN 1 ELSE 0 END) AS canceled
         FROM `tabCRM Task` t {where}""", params, as_dict=True)
-
     row = r[0] if r else {}
     total = row.total or 0
     done = row.done or 0
-    completion_rate = round((done / total) * 100, 1) if total else 0
-
     return {
         "total":           total,
         "done":            done,
@@ -987,100 +1009,64 @@ def _get_task_kpis(fd, td, user=None, project=None):
         "in_progress":     row.in_progress or 0,
         "todo":            row.todo or 0,
         "canceled":        row.canceled or 0,
-        "completion_rate": completion_rate,
+        "completion_rate": round((done / total) * 100, 1) if total else 0,
     }
 
 
 def _get_task_status_breakdown(fd, td, user=None, project=None):
-    """
-    Counts by status: Todo, Backlog, In Progress, Done, Canceled, late
-    With colours matching semantic meaning.
-    """
     where, params = _task_base_where(fd, td, user, project)
     rows = frappe.db.sql(f"""
         SELECT t.status, COUNT(*) AS count
         FROM `tabCRM Task` t {where}
         GROUP BY t.status ORDER BY count DESC""", params, as_dict=True)
-
     status_colours = {
-        "Todo":        "#93c5fd",  # blue
-        "Backlog":     "#d1d5db",  # gray
-        "In Progress": "#fbbf24",  # amber
-        "Done":        "#34d399",  # green
-        "Canceled":    "#9ca3af",  # muted gray
-        "late":        "#f87171",  # red
+        "Todo": "#93c5fd", "Backlog": "#d1d5db", "In Progress": "#fbbf24",
+        "Done": "#34d399", "Canceled": "#9ca3af", "late": "#f87171",
     }
-
     total = sum(r.count or 0 for r in rows)
     return [
-        {
-            "status": r.status,
-            "count": r.count or 0,
-            "color": status_colours.get(r.status, "#94a3b8"),
-            "pct": round((r.count or 0) / total * 100, 1) if total else 0,
-        }
+        {"status": r.status, "count": r.count or 0, "color": status_colours.get(r.status, "#94a3b8"),
+         "pct": round((r.count or 0) / total * 100, 1) if total else 0}
         for r in rows
     ]
 
 
 def _get_task_type_breakdown(fd, td, user=None, project=None):
-    """
-    Counts by task_type: call, property showing, whatsapp message,
-    team meeting, lead meeting, other
-    """
     where, params = _task_base_where(fd, td, user, project)
     rows = frappe.db.sql(f"""
         SELECT t.task_type, COUNT(*) AS count
         FROM `tabCRM Task` t {where}
         GROUP BY t.task_type ORDER BY count DESC""", params, as_dict=True)
-
     type_colours = {
-        "call":              "#60a5fa",
-        "property showing":  "#34d399",
-        "whatsapp message":  "#4ade80",
-        "team meeting":      "#a78bfa",
-        "lead meeting":      "#f472b6",
-        "other":             "#94a3b8",
+        "call": "#60a5fa", "property showing": "#34d399", "whatsapp message": "#4ade80",
+        "team meeting": "#a78bfa", "lead meeting": "#f472b6", "other": "#94a3b8",
     }
-
     total = sum(r.count or 0 for r in rows)
     return [
-        {
-            "type":  r.task_type or "other",
-            "count": r.count or 0,
-            "color": type_colours.get(r.task_type or "other", "#94a3b8"),
-            "pct":   round((r.count or 0) / total * 100, 1) if total else 0,
-        }
+        {"type": r.task_type or "other", "count": r.count or 0,
+         "color": type_colours.get(r.task_type or "other", "#94a3b8"),
+         "pct": round((r.count or 0) / total * 100, 1) if total else 0}
         for r in rows
     ]
 
 
 def _get_task_priority_breakdown(fd, td, user=None, project=None):
-    """Counts by priority: Low, Medium, High."""
     where, params = _task_base_where(fd, td, user, project)
     rows = frappe.db.sql(f"""
         SELECT t.priority, COUNT(*) AS count
         FROM `tabCRM Task` t {where}
         GROUP BY t.priority ORDER BY FIELD(t.priority,'High','Medium','Low')""", params, as_dict=True)
-
     priority_colours = {"High": "#f87171", "Medium": "#fbbf24", "Low": "#34d399"}
     total = sum(r.count or 0 for r in rows)
     return [
-        {
-            "priority": r.priority or "Low",
-            "count":    r.count or 0,
-            "color":    priority_colours.get(r.priority or "Low", "#94a3b8"),
-            "pct":      round((r.count or 0) / total * 100, 1) if total else 0,
-        }
+        {"priority": r.priority or "Low", "count": r.count or 0,
+         "color": priority_colours.get(r.priority or "Low", "#94a3b8"),
+         "pct": round((r.count or 0) / total * 100, 1) if total else 0}
         for r in rows
     ]
 
 
 def _get_task_completion_by_user(fd, td, project=None):
-    """
-    Per-assignee: total tasks, done, late, completion rate.
-    Limited to top 10 by total tasks.
-    """
     extra = []
     params = {}
     if fd and td:
@@ -1090,7 +1076,6 @@ def _get_task_completion_by_user(fd, td, project=None):
         extra.append("t.project=%(task_project)s")
         params["task_project"] = project
     where = ("WHERE " + " AND ".join(extra)) if extra else ""
-
     rows = frappe.db.sql(f"""
         SELECT
             t.assigned_to,
@@ -1102,28 +1087,17 @@ def _get_task_completion_by_user(fd, td, project=None):
         LEFT JOIN `tabUser` u ON u.name=t.assigned_to
         {where}
         GROUP BY t.assigned_to ORDER BY total DESC LIMIT 10""", params, as_dict=True)
-
     return [
-        {
-            "user":            r.assigned_to,
-            "name":            r.name or r.assigned_to,
-            "total":           r.total or 0,
-            "done":            r.done or 0,
-            "late":            r.late or 0,
-            "completion_rate": round((r.done or 0) / (r.total or 1) * 100, 1),
-        }
+        {"user": r.assigned_to, "name": r.name or r.assigned_to, "total": r.total or 0,
+         "done": r.done or 0, "late": r.late or 0,
+         "completion_rate": round((r.done or 0) / (r.total or 1) * 100, 1)}
         for r in rows
     ]
 
 
 def _get_task_overdue_trend(fd, td, user=None, project=None):
-    """
-    Daily counts of tasks created vs tasks that were late/overdue.
-    Only if a date range is specified.
-    """
     if not fd or not td:
         return []
-
     extra = []
     params = {"from_date": fd, "to_date": td}
     if user:
@@ -1131,7 +1105,6 @@ def _get_task_overdue_trend(fd, td, user=None, project=None):
     if project:
         extra.append("t.project=%(task_project)s"); params["task_project"] = project
     extra_cond = ("AND " + " AND ".join(extra)) if extra else ""
-
     rows = frappe.db.sql(f"""
         SELECT
             DATE_FORMAT(t.creation,'%%Y-%%m-%%d') AS date,
@@ -1140,17 +1113,11 @@ def _get_task_overdue_trend(fd, td, user=None, project=None):
         FROM `tabCRM Task` t
         WHERE DATE(t.creation) BETWEEN %(from_date)s AND %(to_date)s {extra_cond}
         GROUP BY DATE(t.creation) ORDER BY date""", params, as_dict=True)
-
     return [{"date": r.date, "total": r.total or 0, "overdue": r.overdue or 0} for r in rows]
 
 
 def _get_task_type_performance(fd, td, user=None, project=None):
-    """
-    For each task type: total, done, late, completion rate.
-    Useful for understanding which task types are bottlenecks.
-    """
     where, params = _task_base_where(fd, td, user, project)
-
     rows = frappe.db.sql(f"""
         SELECT
             t.task_type,
@@ -1159,22 +1126,14 @@ def _get_task_type_performance(fd, td, user=None, project=None):
             SUM(CASE WHEN t.status='late' OR (t.status NOT IN ('Done','Canceled') AND t.due_date < NOW()) THEN 1 ELSE 0 END) AS late
         FROM `tabCRM Task` t {where}
         GROUP BY t.task_type ORDER BY total DESC""", params, as_dict=True)
-
     type_colours = {
-        "call": "#60a5fa", "property showing": "#34d399",
-        "whatsapp message": "#4ade80", "team meeting": "#a78bfa",
-        "lead meeting": "#f472b6", "other": "#94a3b8",
+        "call": "#60a5fa", "property showing": "#34d399", "whatsapp message": "#4ade80",
+        "team meeting": "#a78bfa", "lead meeting": "#f472b6", "other": "#94a3b8",
     }
-
     return [
-        {
-            "type":            r.task_type or "other",
-            "total":           r.total or 0,
-            "done":            r.done or 0,
-            "late":            r.late or 0,
-            "color":           type_colours.get(r.task_type or "other", "#94a3b8"),
-            "completion_rate": round((r.done or 0) / (r.total or 1) * 100, 1),
-        }
+        {"type": r.task_type or "other", "total": r.total or 0, "done": r.done or 0, "late": r.late or 0,
+         "color": type_colours.get(r.task_type or "other", "#94a3b8"),
+         "completion_rate": round((r.done or 0) / (r.total or 1) * 100, 1)}
         for r in rows
     ]
 

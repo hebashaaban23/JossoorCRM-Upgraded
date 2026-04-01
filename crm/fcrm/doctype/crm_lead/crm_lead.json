@@ -258,7 +258,7 @@
    "search_index": 1
   },
   {
-   "default": "New",
+   "default": "Hot",
    "fieldname": "communication_status",
    "fieldtype": "Link",
    "label": "Communication Status",
@@ -736,7 +736,7 @@
  "image_field": "image",
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-03-30 13:08:56.670936",
+ "modified": "2026-04-01 14:02:38.719453",
  "modified_by": "Administrator",
  "module": "FCRM",
  "name": "CRM Lead",
