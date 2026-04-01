@@ -69,10 +69,7 @@
 
     <!-- Body -->
     <div class="w-full overflow-y-auto pb-20">
-      <DashboardGrid
-        v-if="!dashboardItems.loading && dashboardItems.data && !editing"
-        class="pt-4 px-5" v-model="dashboardItems.data" :editing="editing"
-      />
+      
 
       <div v-if="!editing" class="px-5 mt-6 space-y-10">
 
@@ -647,7 +644,6 @@
     </div>
   </div>
 
-  <AddChartModal v-if="showAddChartModal" v-model="showAddChartModal" v-model:items="dashboardItems.data" />
 </template>
 
 <script setup lang="ts">
